@@ -68,6 +68,10 @@ media_fts(...)                           -- FTS over name, tags, ocr_text
 
 ## Phases — each independently shippable
 
+All ten are implemented, one commit per phase on
+`claude/android-photo-organizer-slemb0`. The branch requirement means one PR rather than
+one per phase; the phase boundaries live in the commit history (see `DECISIONS.md`).
+
 | Phase | Scope |
 |---|---|
 | P0  | Scaffold, version catalog, CI, `CLAUDE.md`, `DECISIONS.md`, committed debug keystore (base64 in repo, wired into CI signing so every APK installs over the previous one) |
@@ -98,10 +102,24 @@ media_fts(...)                           -- FTS over name, tags, ocr_text
 ## Build commands
 
 ```bash
-./gradlew testDebugUnitTest     # JVM unit tests — must always pass
-./gradlew assembleDebug         # produces app/build/outputs/apk/debug/app-debug.apk
-./gradlew lint
+./gradlew testDebugUnitTest     # 214 JVM unit tests — must always pass
+./gradlew lintDebug             # must be clean; CI fails on any lint error
+./gradlew assembleDebug         # app/build/outputs/apk/debug/app-debug.apk (~95 MB, arm64)
 ```
+
+Needs JDK 17+ and an Android SDK with platform 35 (`ANDROID_HOME`, or `sdk.dir` in
+`local.properties`).
+
+## Schema versions
+
+- **v1** — initial schema.
+- **v2** — `index_media_size_display_name`, so restore can match an item that was tagged
+  before it was ever hashed without a full table scan per backed-up item.
+- **v3** — `label_suggestion` and `media.auto_scan_state` for on-device suggestions.
+
+Every migration has a test in `MigrationTest` that rebuilds the old schema from Room's
+committed exported JSON, writes representative rows, migrates, and asserts nothing was
+lost. Never add `fallbackToDestructiveMigration`.
 
 The debug keystore lives at `keystore/debug.keystore.base64`; `app/build.gradle.kts`
 decodes it at configure time so every debug APK — local or CI — is signed with the
