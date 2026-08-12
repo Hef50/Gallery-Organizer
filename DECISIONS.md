@@ -249,3 +249,46 @@ one that hitches.
 `LazyPagingItems.get` tells Paging to load around that index. A drag passing over a
 hundred indices would trigger a hundred loads the user never asked for, so every
 selection-time lookup uses `peek`.
+
+---
+
+## P5 — Tagging
+
+### One gesture is one transaction
+Tagging 500 selected photos writes 500 cross-ref rows, bumps the tag's usage counters and
+rebuilds 500 FTS rows inside a single `withTransaction`. Either all of it happened or none
+of it did; the grid can never show a half-applied tag, and an interrupted write cannot
+leave the text index describing tags that are not there.
+
+### Two taps, no Apply button
+With a selection already made, tapping the tag button and then tapping a tag *is* the
+whole gesture — the tag applies immediately and the snackbar offers Undo. An Apply button
+would add a third tap to the most repeated action in the app, and undo is a better safety
+net than confirmation because it costs nothing when you were right.
+
+### Tapping a partially-applied tag applies it to everything
+Tri-state checkboxes have two defensible behaviours when tapped from the indeterminate
+state. "Some of these are tagged Travel and I am tapping Travel" nearly always means "make
+them all Travel", so partial resolves upward. Clearing is still one more tap away.
+
+### Hashing happens after the transaction, not inside it
+A tag write is the moment identity starts to matter, so it is the right time to hash. But
+opening a few hundred files is I/O, and the user's tap must not wait on it. The tags commit
+first; hashing runs after and is idempotent, and anything it misses the idle backfill
+worker picks up.
+
+### `IN (...)` clauses are chunked at 500
+SQLite caps bound variables, so bulk-tagging a few thousand items has to be split. The
+chunks run inside the caller's transaction, so splitting them costs nothing in atomicity.
+
+### Tags carry their ancestors into the text index
+An item tagged `Travel/Japan/Kyoto` has "Travel Japan Kyoto" in its FTS row, so typing
+"travel" finds it. This mirrors what the structured tag filter does by expanding a parent
+to its subtree (OPEN_QUESTIONS.md #4), and it means a rename or a re-parent has to rebuild
+the FTS rows of everything in the affected subtree — which `TagRepository` does.
+
+### A tag cannot be moved into its own subtree
+Allowing it would detach the whole branch from every root: the rows would still exist,
+still hold assignments and still block name reuse, but nothing would ever render them.
+`buildTagTree` also defends the read side — orphans and cycle-stranded tags are promoted to
+roots rather than silently disappearing.

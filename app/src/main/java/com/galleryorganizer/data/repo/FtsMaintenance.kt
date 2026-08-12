@@ -23,7 +23,13 @@ class FtsMaintenance(private val db: AppDatabase) {
      */
     suspend fun rebuild(mediaIds: List<Long>) {
         if (mediaIds.isEmpty()) return
+        // `IN (...)` binds one variable per id and SQLite caps them, so a bulk tag of a
+        // few thousand items has to be split. The chunks stay inside the caller's
+        // transaction, so this is still all-or-nothing.
+        mediaIds.chunked(CHUNK).forEach { rebuildChunk(it) }
+    }
 
+    private suspend fun rebuildChunk(mediaIds: List<Long>) {
         val rows = db.mediaDao().byIds(mediaIds)
         if (rows.isEmpty()) {
             db.mediaFtsDao().deleteRows(mediaIds)
@@ -53,6 +59,10 @@ class FtsMaintenance(private val db: AppDatabase) {
                 )
             },
         )
+    }
+
+    private companion object {
+        const val CHUNK = 500
     }
 }
 

@@ -1,5 +1,11 @@
 package com.galleryorganizer.ui
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Sell
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -10,6 +16,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import com.galleryorganizer.di.AppContainer
 import com.galleryorganizer.permissions.MediaAccess
 import com.galleryorganizer.permissions.MediaPermissionState
@@ -19,9 +28,17 @@ import com.galleryorganizer.ui.permissions.MediaPermissionScreen
 import com.galleryorganizer.ui.permissions.PartialAccessBanner
 import com.galleryorganizer.ui.permissions.rememberMediaPermissionController
 import com.galleryorganizer.ui.permissions.rememberMediaPermissionState
+import com.galleryorganizer.ui.tags.BulkTagSheet
+import com.galleryorganizer.ui.tags.TagManagerScreen
+import com.galleryorganizer.ui.tags.TagViewModel
 import com.galleryorganizer.work.IndexingStatus
 import com.galleryorganizer.work.WorkScheduler
 import kotlinx.coroutines.launch
+
+object Routes {
+    const val GALLERY = "gallery"
+    const val TAGS = "tags"
+}
 
 @Composable
 fun GalleryOrganizerApp() {
@@ -43,8 +60,8 @@ fun GalleryOrganizerApp() {
 
     LaunchedEffect(liveState) { overrideState = null }
 
-    when (permissions.access) {
-        MediaAccess.None -> MediaPermissionScreen(
+    if (permissions.access == MediaAccess.None) {
+        MediaPermissionScreen(
             hasAskedBefore = hasAsked,
             canShowRationale = controller.canShowRationale,
             onRequest = {
@@ -53,25 +70,52 @@ fun GalleryOrganizerApp() {
             },
             onOpenSettings = controller::openAppSettings,
         )
+        return
+    }
 
-        MediaAccess.Partial, MediaAccess.Full -> {
-            // A catch-up pass, not a rescan: the indexer only reads past its watermark,
-            // so on a quiet day this reads a handful of rows.
-            LaunchedEffect(permissions.access) {
-                WorkScheduler.enqueueIndex(context)
-                WorkScheduler.enqueuePeriodicIndex(context)
-            }
+    // A catch-up pass, not a rescan: the indexer only reads past its watermark, so on a
+    // quiet day this reads a handful of rows.
+    LaunchedEffect(permissions.access) {
+        WorkScheduler.enqueueIndex(context)
+        WorkScheduler.enqueuePeriodicIndex(context)
+    }
 
+    val navController = rememberNavController()
+    val galleryViewModel: GalleryViewModel = viewModel(factory = GalleryViewModel.Factory(container))
+    val tagViewModel: TagViewModel = viewModel(factory = TagViewModel.Factory(container))
+
+    NavHost(navController, startDestination = Routes.GALLERY) {
+        composable(Routes.GALLERY) {
             val indexing by remember(context) { WorkScheduler.observeIndexing(context) }
                 .collectAsStateWithLifecycle(IndexingStatus())
+            val selection by galleryViewModel.selection.collectAsStateWithLifecycle()
+            val lastAction by tagViewModel.lastAction.collectAsStateWithLifecycle()
+            val snackbarHostState = remember { SnackbarHostState() }
+            var sheetOpen by remember { mutableStateOf(false) }
 
-            val viewModel: GalleryViewModel = viewModel(
-                factory = GalleryViewModel.Factory(container),
-            )
+            LaunchedEffect(lastAction) {
+                val action = lastAction ?: return@LaunchedEffect
+                val verb = if (action.wasApplied) "Tagged" else "Removed"
+                val result = snackbarHostState.showSnackbar(
+                    message = "$verb %,d item%s · %s".format(
+                        action.mediaIds.size,
+                        if (action.mediaIds.size == 1) "" else "s",
+                        action.tagName,
+                    ),
+                    actionLabel = "Undo",
+                    withDismissAction = true,
+                )
+                if (result == SnackbarResult.ActionPerformed) {
+                    tagViewModel.undoLast()
+                } else {
+                    tagViewModel.consumeUndo()
+                }
+            }
 
             GalleryScreen(
-                viewModel = viewModel,
+                viewModel = galleryViewModel,
                 indexing = indexing,
+                snackbarHostState = snackbarHostState,
                 banner = {
                     if (permissions.access == MediaAccess.Partial && !bannerDismissed) {
                         PartialAccessBanner(
@@ -85,7 +129,29 @@ fun GalleryOrganizerApp() {
                         )
                     }
                 },
+                selectionActions = {
+                    IconButton(onClick = { sheetOpen = true }) {
+                        Icon(Icons.Filled.Sell, contentDescription = "Tag selected items")
+                    }
+                },
+                topBarActions = {
+                    IconButton(onClick = { navController.navigate(Routes.TAGS) }) {
+                        Icon(Icons.Filled.Sell, contentDescription = "Manage tags")
+                    }
+                },
             )
+
+            if (sheetOpen && selection.active) {
+                BulkTagSheet(
+                    selection = selection.selected,
+                    viewModel = tagViewModel,
+                    onDismiss = { sheetOpen = false },
+                )
+            }
+        }
+
+        composable(Routes.TAGS) {
+            TagManagerScreen(viewModel = tagViewModel, onBack = { navController.popBackStack() })
         }
     }
 }

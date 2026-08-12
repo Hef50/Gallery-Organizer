@@ -9,6 +9,7 @@ import com.galleryorganizer.data.prefs.SettingsStore
 import com.galleryorganizer.data.repo.FtsMaintenance
 import com.galleryorganizer.data.repo.MediaIndexer
 import com.galleryorganizer.data.repo.MediaRepository
+import com.galleryorganizer.data.repo.TagRepository
 
 /**
  * The whole dependency graph. Everything is lazy so that nothing touches disk during
@@ -32,6 +33,8 @@ class AppContainer(context: Context) {
     val mediaRepository: MediaRepository by lazy {
         MediaRepository(database, appContext.contentResolver)
     }
+
+    val tagRepository: TagRepository by lazy { TagRepository(database, ftsMaintenance) }
 
     val mediaIndexer: MediaIndexer by lazy {
         MediaIndexer(mediaStoreSource, database, ftsMaintenance)

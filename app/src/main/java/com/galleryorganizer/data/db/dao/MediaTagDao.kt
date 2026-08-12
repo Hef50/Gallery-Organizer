@@ -86,6 +86,10 @@ interface MediaTagDao {
     @Query("SELECT COUNT(*) FROM media_tag WHERE tag_id = :tagId")
     suspend fun itemCountFor(tagId: Long): Int
 
+    /** Everything carrying a tag, so its FTS text can be rebuilt after a rename or move. */
+    @Query("SELECT media_id FROM media_tag WHERE tag_id = :tagId")
+    suspend fun mediaIdsFor(tagId: Long): List<Long>
+
     @Query("SELECT COUNT(*) FROM media_tag")
     suspend fun count(): Int
 
