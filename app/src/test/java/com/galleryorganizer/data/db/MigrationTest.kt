@@ -202,6 +202,46 @@ class MigrationTest {
         assertThat(db.mediaTagDao().count()).isEqualTo(1)
         assertThat(db.mediaDao().bySizeAndName(123456, "IMG_0042.jpg")).hasSize(1)
         assertThat(db.suggestionDao().count()).isEqualTo(0)
+        assertThat(db.mediaDao().unanalysedCount()).isEqualTo(1)
+    }
+
+    @Test
+    fun `v3 to v4 swaps the boolean indices for the composite the grid needs`() = runTest {
+        seedSchema(version = 3) {
+            execSQL(
+                """
+                INSERT INTO media (id, content_hash, mediastore_id, uri, display_name,
+                    relative_path, bucket_id, bucket_name, mime, is_video, size, date_taken,
+                    date_modified, date_added, date_first_indexed, duration, width, height,
+                    orientation, is_missing, ocr_text, auto_scan_state)
+                VALUES (1, 'deadbeef', 42, 'content://media/external/images/media/42',
+                    'IMG_0042.jpg', 'DCIM/Camera/', 7, 'Camera', 'image/jpeg', 0, 123456,
+                    1700000000000, 1700000000, 1700000000, 1700000000000, 0, 4032, 3024,
+                    0, 0, 'a receipt', 1)
+                """.trimIndent(),
+            )
+            execSQL("INSERT INTO tag (id, name, parent_id, color, last_used_at, usage_count) VALUES (1, 'Travel', 0, NULL, 0, 0)")
+            execSQL("INSERT INTO media_tag (media_id, tag_id, source, created_at) VALUES (1, 1, 'manual', 1)")
+            execSQL("INSERT INTO label_suggestion (media_id, label, confidence, status, created_at) VALUES (1, 'Beach', 0.9, 'pending', 1)")
+        }
+
+        val db = openThroughRoom()
+
+        val indices = db.query("SELECT name FROM sqlite_master WHERE type='index'", null).use { c ->
+            buildList { while (c.moveToNext()) add(c.getString(0)) }
+        }
+        assertThat(indices).contains("index_media_is_missing_date_taken_id")
+        assertThat(indices).contains("index_media_bucket_id_date_taken")
+        // The two-value indices are gone: they excluded nothing and misled the planner
+        // into sorting the whole library.
+        assertThat(indices).doesNotContain("index_media_is_missing")
+        assertThat(indices).doesNotContain("index_media_is_video")
+
+        val item = db.mediaDao().byContentHash("deadbeef")!!
+        assertThat(item.ocrText).isEqualTo("a receipt")
+        assertThat(item.autoScanState).isEqualTo(1)
+        assertThat(db.mediaTagDao().tagsFor(item.id).map { it.name }).containsExactly("Travel")
+        assertThat(db.suggestionDao().count()).isEqualTo(1)
     }
 
     @Test

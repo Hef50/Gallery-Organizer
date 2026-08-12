@@ -47,7 +47,7 @@ installs straight over the previous one.
 ## Build
 
 ```bash
-./gradlew testDebugUnitTest     # 214 JVM unit tests, no device or emulator needed
+./gradlew testDebugUnitTest     # 223 JVM unit tests, no device or emulator needed
 ./gradlew lintDebug
 ./gradlew assembleDebug         # app/build/outputs/apk/debug/app-debug.apk
 ```

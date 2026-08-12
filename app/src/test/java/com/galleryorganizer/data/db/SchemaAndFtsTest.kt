@@ -22,11 +22,14 @@ class SchemaAndFtsTest : DbTest() {
         val indices = db.query("SELECT name FROM sqlite_master WHERE type='index'", null).use { c ->
             buildList { while (c.moveToNext()) add(c.getString(0)) }
         }
-        // These four are the difference between a 50 ms query and a full scan at 150k rows.
+        // These are the difference between a 50 ms query and a full scan plus an in-memory
+        // sort at 150k rows. QueryPlanTest checks the planner actually uses them.
         assertThat(indices).containsAtLeast(
+            "index_media_is_missing_date_taken_id",
+            "index_media_bucket_id_date_taken",
             "index_media_date_taken",
-            "index_media_bucket_id",
             "index_media_content_hash",
+            "index_media_size_display_name",
             "index_media_tag_tag_id",
         )
     }

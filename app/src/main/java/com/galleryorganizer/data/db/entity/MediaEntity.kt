@@ -22,10 +22,26 @@ import androidx.room.PrimaryKey
         Index(value = ["content_hash"]),
         Index(value = ["mediastore_id"]),
         Index(value = ["date_taken"]),
-        Index(value = ["bucket_id"]),
         Index(value = ["date_modified"]),
-        Index(value = ["is_missing"]),
-        Index(value = ["is_video"]),
+        /**
+         * The grid's index, added in schema v4 — and the single most important one in the
+         * database.
+         *
+         * The grid is always `WHERE is_missing = 0 ... ORDER BY date_taken DESC, id DESC`.
+         * With separate single-column indices SQLite chose `index_media_is_missing`, which
+         * has two distinct values and therefore excludes nothing, and then sorted the whole
+         * result in a temp B-tree — 150,000 rows sorted in memory for every grid load.
+         * This composite lets it seek `is_missing = 0` and walk the range already in date
+         * order, so `LIMIT` stops early and no sort happens at all. `QueryPlanTest` is what
+         * caught that and is what stops it coming back.
+         *
+         * The single-column `is_missing` and `is_video` indices were *removed* in the same
+         * migration: this composite serves every `is_missing` lookup via its leftmost
+         * column, and a two-value index is otherwise only useful for misleading the planner.
+         */
+        Index(value = ["is_missing", "date_taken", "id"]),
+        /** Same shape for a folder-filtered grid, where date order still has to hold. */
+        Index(value = ["bucket_id", "date_taken"]),
         // Added in schema v2 for restore's fallback match: an item tagged before it was
         // ever hashed can only be found again by (size, name), and that lookup runs once
         // per backed-up item. Without the index it is a full table scan each time.

@@ -63,7 +63,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun suggestionDao(): SuggestionDao
 
     companion object {
-        const val VERSION = 3
+        const val VERSION = 4
         const val NAME = "gallery-organizer.db"
 
         fun build(context: Context): AppDatabase =

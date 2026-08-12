@@ -74,4 +74,31 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
-val ALL_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+/**
+ * v3 → v4: replace two single-column boolean indices with composites that carry the sort.
+ *
+ * `QueryPlanTest` caught SQLite choosing `index_media_is_missing` for the grid — an index
+ * over a column with two distinct values, so it excluded nothing — and then sorting the
+ * entire result set in a temp B-tree. At 150,000 rows that is the whole library sorted in
+ * memory on every grid load. `(is_missing, date_taken, id)` lets the planner seek and then
+ * walk the range already in order, so `LIMIT` stops early and there is no sort.
+ *
+ * Indices only: no row is read, rewritten or deleted.
+ */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP INDEX IF EXISTS `index_media_is_missing`")
+        db.execSQL("DROP INDEX IF EXISTS `index_media_is_video`")
+        db.execSQL("DROP INDEX IF EXISTS `index_media_bucket_id`")
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_media_is_missing_date_taken_id` " +
+                "ON `media` (`is_missing`, `date_taken`, `id`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_media_bucket_id_date_taken` " +
+                "ON `media` (`bucket_id`, `date_taken`)",
+        )
+    }
+}
+
+val ALL_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)

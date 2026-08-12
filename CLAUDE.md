@@ -102,7 +102,7 @@ one per phase; the phase boundaries live in the commit history (see `DECISIONS.m
 ## Build commands
 
 ```bash
-./gradlew testDebugUnitTest     # 214 JVM unit tests — must always pass
+./gradlew testDebugUnitTest     # 223 JVM unit tests — must always pass
 ./gradlew lintDebug             # must be clean; CI fails on any lint error
 ./gradlew assembleDebug         # app/build/outputs/apk/debug/app-debug.apk (~95 MB, arm64)
 ```
@@ -116,6 +116,10 @@ Needs JDK 17+ and an Android SDK with platform 35 (`ANDROID_HOME`, or `sdk.dir` 
 - **v2** — `index_media_size_display_name`, so restore can match an item that was tagged
   before it was ever hashed without a full table scan per backed-up item.
 - **v3** — `label_suggestion` and `media.auto_scan_state` for on-device suggestions.
+- **v4** — replaced the single-column `is_missing` / `is_video` / `bucket_id` indices with
+  `(is_missing, date_taken, id)` and `(bucket_id, date_taken)`. `QueryPlanTest` caught
+  SQLite choosing the two-value `is_missing` index for the grid and then sorting the entire
+  result in a temp B-tree; the composites carry the sort so `LIMIT` stops early.
 
 Every migration has a test in `MigrationTest` that rebuilds the old schema from Room's
 committed exported JSON, writes representative rows, migrates, and asserts nothing was

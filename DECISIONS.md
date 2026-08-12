@@ -520,3 +520,27 @@ ML Kit's bundled models ship native libraries for four ABIs, which made the univ
 APK about 155 MB — most of it for architectures a Galaxy S25 Ultra will never run.
 Restricting to arm64 cuts it to about 95 MB. The remaining size is discussed in
 `OPEN_QUESTIONS.md`.
+
+---
+
+## Performance — guarded by query plans, not stopwatches
+
+`QueryPlanTest` runs `EXPLAIN QUERY PLAN` over the queries that decide whether the app is
+usable at 150,000 rows, and asserts SQLite picks an index and does not sort.
+
+A wall-clock assertion on Robolectric's SQLite would say nothing about a phone — different
+engine speed, a tiny data set, and a number that is either flaky or meaningless. What
+actually separates 5 ms from 5 seconds is index versus scan, and `EXPLAIN QUERY PLAN`
+answers that deterministically.
+
+It earned its place immediately. The grid query — the single most-run query in the app —
+was choosing `index_media_is_missing`, an index over a column with two distinct values that
+therefore excluded nothing, and then sorting the whole result set in a temp B-tree. At 150k
+rows that is the entire library sorted in memory on every grid load, and every other test in
+the suite passed while it happened.
+
+Schema v4 replaces it with `(is_missing, date_taken, id)`, so the planner seeks and then
+walks the range already in date order and `LIMIT` stops early, plus
+`(bucket_id, date_taken)` for the folder-filtered grid. The lesson generalises: a
+single-column index on a boolean is rarely useful as a filter and is very good at
+misleading the planner away from the index that carries the ordering.
