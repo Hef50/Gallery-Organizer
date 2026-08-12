@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- A stack of photo cards with a tag cut into the top card. -->
+    <path
+        android:fillColor="#8AB4F8"
+        android:pathData="M32,34h44a4,4 0,0 1,4 4v32a4,4 0,0 1,-4 4h-44a4,4 0,0 1,-4 -4v-32a4,4 0,0 1,4 -4z" />
+    <path
+        android:fillColor="#1B1B1F"
+        android:pathData="M36,64l10,-13 8,10 6,-7 12,15z" />
+    <path
+        android:fillColor="#1B1B1F"
+        android:pathData="M66,42m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+    <path
+        android:fillColor="#5F6368"
+        android:pathData="M38,78h38v3h-38z" />
+</vector>
