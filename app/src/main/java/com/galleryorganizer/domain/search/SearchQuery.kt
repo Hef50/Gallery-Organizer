@@ -63,6 +63,13 @@ data class SearchQuery(
 
     val bucketIds: List<Long> = emptyList(),
 
+    /**
+     * Folders the user has hidden. Kept separate from [bucketIds] so that "show me only
+     * Screenshots" still works while Screenshots is hidden from the default grid — an
+     * explicit request always beats a standing preference.
+     */
+    val excludedBucketIds: List<Long> = emptyList(),
+
     /** Inclusive, milliseconds, compared against `date_taken`. */
     val takenFrom: Long? = null,
 

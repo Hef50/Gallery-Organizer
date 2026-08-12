@@ -183,6 +183,39 @@ class SearchRepositoryTest : DbTest() {
         assertThat(count(query)).isEqualTo(3)
     }
 
+    @Test
+    fun `hidden folders drop out of the default grid`() = runTest {
+        media.insertAll(
+            listOf(
+                sampleMedia(1, bucketId = 1, bucketName = "Camera"),
+                sampleMedia(2, bucketId = 2, bucketName = "WhatsApp"),
+                sampleMedia(3, bucketId = 2, bucketName = "WhatsApp"),
+            ),
+        )
+
+        val visible = results(SearchQuery(excludedBucketIds = listOf(2)))
+
+        assertThat(visible).hasSize(1)
+    }
+
+    @Test
+    fun `asking for a hidden folder explicitly still shows it`() = runTest {
+        media.insertAll(
+            listOf(
+                sampleMedia(1, bucketId = 1),
+                sampleMedia(2, bucketId = 2),
+            ),
+        )
+
+        // An explicit request beats a standing "hide this" preference — otherwise the
+        // folder would be unreachable and the user could not tell why.
+        val explicit = results(
+            SearchQuery(bucketIds = listOf(2), excludedBucketIds = listOf(2)),
+        )
+
+        assertThat(explicit).hasSize(1)
+    }
+
     // --- Saved searches ---------------------------------------------------------------
 
     @Test

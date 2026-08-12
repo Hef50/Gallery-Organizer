@@ -99,7 +99,27 @@ without review.
 
 ---
 
-### 8. Network-blocked dependencies
+### 8. The debug APK is about 95 MB
+
+Roughly 70 MB of that is un-shrunk dex — `material-icons-extended` is the biggest single
+contributor — and about 22 MB is ML Kit's bundled OCR and labelling native libraries.
+Restricting the build to `arm64-v8a` already cut it from ~155 MB, since the S25 Ultra will
+never run the other three ABIs.
+
+Getting it below ~30 MB means one of:
+
+- **Turn on R8 for the debug build.** Debug builds are the shipping vehicle here, so this is
+  not as odd as it sounds — but R8 with Room, ML Kit and kotlinx.serialization needs to be
+  verified on a real device, and there is no device in this sandbox to verify it on.
+- **Drop `material-icons-extended`** and hand-draw the fourteen icons it provides that the
+  core set does not.
+
+**Current behaviour:** arm64-only, no shrinking, ~95 MB. It installs and runs fine; it is
+just a chunky download over mobile data.
+
+---
+
+### 9. Network-blocked dependencies
 
 None so far — `dl.google.com`, `repo1.maven.org` and `plugins.gradle.org` are all
 reachable from the sandbox, and the Android SDK downloads fine. If this changes, the

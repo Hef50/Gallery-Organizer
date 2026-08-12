@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -57,6 +58,12 @@ class GalleryViewModel(
      */
     private val debouncedQuery: Flow<SearchQuery> = _query
         .debounce { if (it.text.isBlank()) 0L else SEARCH_DEBOUNCE_MS }
+        // Hidden folders are folded in here rather than into _query, so they never end up
+        // baked into a saved search — hiding a folder is a view preference, not part of
+        // what the user asked for.
+        .combine(container.settings.hiddenBucketIds) { query, hidden ->
+            query.copy(excludedBucketIds = hidden.toList())
+        }
         .distinctUntilChanged()
 
     val itemCount: StateFlow<Int> = debouncedQuery
@@ -135,6 +142,13 @@ class GalleryViewModel(
 
     fun setSavedSearchPinned(id: Long, pinned: Boolean) {
         viewModelScope.launch { search.setPinned(id, pinned) }
+    }
+
+    /** The quick-filter chips above the grid. */
+    fun applyQuickFilter(filter: QuickFilter) {
+        _activeSavedSearch.value = null
+        _query.value = filter.apply(_query.value)
+        clearSelection()
     }
 
     /** Selects everything the current filter matches, up to a bounded ceiling. */

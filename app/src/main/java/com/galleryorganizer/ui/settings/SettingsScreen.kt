@@ -46,6 +46,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenDuplicates: () -> Unit = {},
     onOpenSuggestions: () -> Unit = {},
+    onOpenFolders: () -> Unit = {},
 ) {
     val transfer by viewModel.transfer.collectAsStateWithLifecycle()
     val xmpState by viewModel.xmp.collectAsStateWithLifecycle()
@@ -147,6 +148,11 @@ fun SettingsScreen(
                 title = "Find duplicates",
                 subtitle = "Items whose contents are identical",
                 onClick = onOpenDuplicates,
+            )
+            SettingRow(
+                title = "Folders",
+                subtitle = "Keep folders like WhatsApp or Screenshots out of the gallery",
+                onClick = onOpenFolders,
             )
             SettingRow(
                 title = "Re-read the whole library",

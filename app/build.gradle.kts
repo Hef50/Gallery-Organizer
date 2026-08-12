@@ -33,6 +33,15 @@ android {
         versionName = "0.11.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        // The target device is a Galaxy S25 Ultra and the APK is installed by hand from a
+        // CI artifact. ML Kit's bundled models ship native libraries for four ABIs, which
+        // makes a universal debug APK about 150 MB — most of it for architectures this
+        // phone will never run. Restricting to arm64 cuts that by roughly two thirds.
+        // See DECISIONS.md.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+
         ksp {
             arg("room.schemaLocation", "$projectDir/schemas")
             arg("room.incremental", "true")

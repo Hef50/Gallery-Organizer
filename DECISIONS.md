@@ -479,3 +479,39 @@ rather than monopolising a single execution window.
 ### ML Kit sits behind an `ImageAnalyzer` interface
 Which is what lets every rule above — thresholds, deduplication, what happens to a failure,
 what accepting does to a manual tag — be tested on the JVM with no device and no model.
+
+---
+
+## P10 — Polish
+
+### Hiding a folder is a view preference, not a filter
+Hidden folders are folded into the query *downstream* of the state the UI reads, so they
+never end up baked into a saved search and never make a quick-filter chip look unselected.
+And an explicit folder filter beats the standing preference: "show me only Screenshots"
+works while Screenshots is hidden, because otherwise the folder would be unreachable and
+the user could not tell why.
+
+### "Recently added" uses the app's own first-seen timestamp
+MediaStore's `DATE_ADDED` is when the file landed on the device and `DATE_TAKEN` is when the
+shot was taken. A photo restored from a backup has a brand-new `DATE_ADDED` and a years-old
+`DATE_TAKEN`, and neither is "new to you". `media.date_first_indexed` is.
+
+### Duplicates are trashed, not deleted, and the oldest copy is always kept
+`MediaStore.createTrashRequest` keeps the files recoverable for 30 days and puts Android's
+own confirmation in front of the user. This app is not going to be the reason a photo is
+gone forever. The oldest copy by `date_added` is never offered for removal — it is the one
+whose path anything else on the device is most likely to reference — and the removed rows
+are flagged `is_missing` rather than deleted, so their tags are still there if the user
+restores them from the trash.
+
+### The duplicate finder tells you when it does not know
+Hashing is lazy, so on a fresh install most of the library has no `content_hash` and the
+duplicate finder genuinely cannot see duplicates yet. Rather than showing a confident
+"no duplicates", the screen says how many items are still unchecked and offers to hash them
+now instead of waiting for the idle worker.
+
+### `abiFilters = ["arm64-v8a"]`
+ML Kit's bundled models ship native libraries for four ABIs, which made the universal debug
+APK about 155 MB — most of it for architectures a Galaxy S25 Ultra will never run.
+Restricting to arm64 cuts it to about 95 MB. The remaining size is discussed in
+`OPEN_QUESTIONS.md`.

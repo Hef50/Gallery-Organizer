@@ -23,10 +23,6 @@ class IndexNotifier(private val context: Context) {
 
     private val manager = NotificationManagerCompat.from(context)
 
-    private val canPost: Boolean
-        get() = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
-
     fun ensureChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
@@ -64,12 +60,19 @@ class IndexNotifier(private val context: Context) {
     }
 
     fun clear() {
-        if (canPost) manager.cancel(NOTIFICATION_ID)
+        runCatching { manager.cancel(NOTIFICATION_ID) }
     }
 
     private fun post(notification: Notification) {
         // POST_NOTIFICATIONS is optional: indexing must work perfectly well without it.
-        if (canPost) manager.notify(NOTIFICATION_ID, notification)
+        // The check is inline rather than behind `canPost` so lint can see it, and the
+        // catch covers the OEM builds that throw anyway after granting.
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        runCatching { manager.notify(NOTIFICATION_ID, notification) }
     }
 
     companion object {

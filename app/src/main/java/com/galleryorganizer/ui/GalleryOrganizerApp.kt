@@ -26,7 +26,10 @@ import com.galleryorganizer.di.AppContainer
 import com.galleryorganizer.permissions.MediaAccess
 import com.galleryorganizer.permissions.MediaPermissionState
 import com.galleryorganizer.ui.grid.GalleryScreen
+import com.galleryorganizer.ui.duplicates.DuplicatesScreen
+import com.galleryorganizer.ui.duplicates.DuplicatesViewModel
 import com.galleryorganizer.ui.grid.GalleryViewModel
+import com.galleryorganizer.ui.grid.QuickFilterRow
 import com.galleryorganizer.ui.permissions.MediaPermissionScreen
 import com.galleryorganizer.ui.permissions.PartialAccessBanner
 import com.galleryorganizer.ui.permissions.rememberMediaPermissionController
@@ -34,6 +37,7 @@ import com.galleryorganizer.ui.permissions.rememberMediaPermissionState
 import com.galleryorganizer.ui.search.FilterSheet
 import com.galleryorganizer.ui.search.GallerySearchBar
 import com.galleryorganizer.ui.search.SavedSearchRow
+import com.galleryorganizer.ui.settings.FoldersScreen
 import com.galleryorganizer.ui.settings.SettingsScreen
 import com.galleryorganizer.ui.settings.SettingsViewModel
 import com.galleryorganizer.ui.suggestions.SuggestionsScreen
@@ -50,6 +54,8 @@ object Routes {
     const val TAGS = "tags"
     const val SETTINGS = "settings"
     const val SUGGESTIONS = "suggestions"
+    const val DUPLICATES = "duplicates"
+    const val FOLDERS = "folders"
 }
 
 @Composable
@@ -153,6 +159,10 @@ fun GalleryOrganizerApp() {
                             onTextChange = galleryViewModel::setText,
                             onOpenFilters = { filtersOpen = true },
                         )
+                        QuickFilterRow(
+                            query = query,
+                            onSelect = galleryViewModel::applyQuickFilter,
+                        )
                         SavedSearchRow(
                             saved = saved,
                             activeId = activeSaved?.id,
@@ -219,6 +229,27 @@ fun GalleryOrganizerApp() {
                 viewModel = settingsViewModel,
                 onBack = { navController.popBackStack() },
                 onOpenSuggestions = { navController.navigate(Routes.SUGGESTIONS) },
+                onOpenDuplicates = { navController.navigate(Routes.DUPLICATES) },
+                onOpenFolders = { navController.navigate(Routes.FOLDERS) },
+            )
+        }
+
+        composable(Routes.DUPLICATES) {
+            val duplicatesViewModel: DuplicatesViewModel =
+                viewModel(factory = DuplicatesViewModel.Factory(container))
+            DuplicatesScreen(
+                viewModel = duplicatesViewModel,
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Routes.FOLDERS) {
+            val buckets by galleryViewModel.buckets.collectAsStateWithLifecycle()
+            FoldersScreen(
+                buckets = buckets,
+                hiddenIds = container.settings.hiddenBucketIds,
+                settings = container.settings,
+                onBack = { navController.popBackStack() },
             )
         }
 

@@ -38,6 +38,13 @@ object SearchSql {
             args.addAll(query.bucketIds)
         }
 
+        // Hidden folders are dropped when the user has not explicitly asked for a folder;
+        // asking for one is a stronger signal than a standing "hide this" preference.
+        if (query.excludedBucketIds.isNotEmpty() && query.bucketIds.isEmpty()) {
+            where += "m.bucket_id NOT IN (${placeholders(query.excludedBucketIds.size)})"
+            args.addAll(query.excludedBucketIds)
+        }
+
         query.takenFrom?.let {
             where += "m.date_taken >= ?"
             args += it
