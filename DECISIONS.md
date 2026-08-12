@@ -390,3 +390,46 @@ half-applied.
 ### Export opens with mode `"wt"`
 Without truncation, overwriting a larger existing backup leaves the tail of the old file
 behind and silently produces a corrupt one.
+
+---
+
+## P8 — XMP write-back
+
+### JPEG and PNG are embedded; HEIC, RAW and video get sidecars
+JPEG is a marker-segment stream and PNG is a CRC-checked chunk list — both can be rewritten
+by copying every other segment through byte for byte and swapping one. HEIF cannot: XMP
+lives as a `mime` item inside the `meta` box, and adding one means rewriting the item
+location table, i.e. a whole-container rewrite where a mistake produces an unopenable
+photo. The app's promise is that it never corrupts a file, and a sidecar keeps that promise
+absolutely. Logged in `OPEN_QUESTIONS.md` in case the user would rather have HEIC embedding
+and accept the risk.
+
+### The XMP packet is hand-built
+The only libraries that write XMP properly on Android are Adobe's XMP Toolkit (not on Maven
+Central, heavyweight) and metadata-extractor (read-only). A `dc:subject` bag is thirty lines
+of XML. Hand-building it means the app writes exactly what it intends and nothing else — no
+surprise properties, no dependency, no APK weight.
+
+### The write is: copy, stage, verify, write, confirm
+1. The original is copied byte for byte into the app's cache.
+2. The rewritten version is built into a *second* temp file.
+3. The staged file is re-parsed and its `dc:subject` checked against what was intended, and
+   its length sanity-checked against the original. A failure here means the original is
+   never opened for writing at all.
+4. Only then is the original opened and the verified bytes streamed in.
+5. The destination is re-read before the backup copy is dropped; if it does not confirm,
+   the backup is written back.
+
+Every failure path leaves the original untouched and is reported by name.
+
+### Keywords the app did not write are preserved
+The database is authoritative for *this app's* tags, but another tool's keywords are not
+this app's to delete. Removing a tag in the app removes it from the file; a keyword the app
+never wrote survives the rewrite.
+
+### Consent is per batch, through the system dialog
+`MediaStore.createWriteRequest` puts Android's own dialog in front of the user listing the
+affected files. That is not something the app can or should route around, and it is why
+write-back is a manual action rather than something that fires on every tag edit. If the
+user declines, the export falls back to sidecars where possible — they said no to changing
+their originals, not no to exporting tags.

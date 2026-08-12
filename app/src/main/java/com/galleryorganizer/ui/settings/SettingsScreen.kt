@@ -47,6 +47,7 @@ fun SettingsScreen(
     onOpenDuplicates: () -> Unit = {},
 ) {
     val transfer by viewModel.transfer.collectAsStateWithLifecycle()
+    val xmpState by viewModel.xmp.collectAsStateWithLifecycle()
     val itemCount by viewModel.itemCount.collectAsStateWithLifecycle()
     val missingCount by viewModel.missingCount.collectAsStateWithLifecycle()
     val xmpWriteBack by viewModel.settings.xmpWriteBackEnabled.collectAsStateWithLifecycle(false)
@@ -166,6 +167,11 @@ fun SettingsScreen(
                 checked = xmpWriteBack,
                 onCheckedChange = { scope.launch { viewModel.settings.setXmpWriteBackEnabled(it) } },
             )
+            SettingRow(
+                title = "Write tags into files now",
+                subtitle = "A one-off export. Nothing is written automatically when you tag.",
+                onClick = viewModel::beginXmpExport,
+            )
             ToggleRow(
                 title = "Write .xmp sidecar files",
                 subtitle = "Never modifies the original — safe for videos and RAW",
@@ -187,6 +193,14 @@ fun SettingsScreen(
             Spacer(Modifier.height(32.dp))
         }
     }
+
+    XmpExportFlow(
+        state = xmpState,
+        onConsentGranted = viewModel::onWriteConsentGranted,
+        onConsentDenied = viewModel::onWriteConsentDenied,
+        onSidecarFolderChosen = viewModel::onSidecarFolderChosen,
+        onDismiss = viewModel::dismissXmp,
+    )
 
     when (val state = transfer) {
         is TransferState.Exported -> AlertDialog(

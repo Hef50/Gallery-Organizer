@@ -7,6 +7,9 @@ import androidx.lifecycle.viewModelScope
 import com.galleryorganizer.data.backup.BackupStats
 import com.galleryorganizer.data.backup.ImportReport
 import com.galleryorganizer.di.AppContainer
+import com.galleryorganizer.xmp.XmpContainer
+import com.galleryorganizer.xmp.XmpExportReport
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -76,6 +79,100 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun dismissTransfer() {
         _transfer.value = TransferState.Idle
+    }
+
+    // --- XMP write-back (P8) -----------------------------------------------------------
+
+    private val _xmp = MutableStateFlow<XmpExportState>(XmpExportState.Idle)
+    val xmp: StateFlow<XmpExportState> = _xmp.asStateFlow()
+
+    private var sidecarFolder: Uri? = null
+
+    /**
+     * Starts a write-back run. Embedding into files the app does not own requires the
+     * user's explicit consent through a system dialog, so the flow pauses here and the UI
+     * fires `MediaStore.createWriteRequest` before anything is written.
+     */
+    fun beginXmpExport() {
+        viewModelScope.launch {
+            val embed = container.settings.xmpWriteBackEnabled.first()
+            val sidecars = container.settings.xmpSidecarEnabled.first()
+            if (!embed && !sidecars) {
+                _xmp.value = XmpExportState.Finished(XmpExportReport())
+                return@launch
+            }
+
+            val ids = container.database.mediaDao().let { dao ->
+                buildList {
+                    var offset = 0
+                    while (true) {
+                        val page = dao.taggedIdsPage(500, offset)
+                        if (page.isEmpty()) break
+                        addAll(page)
+                        offset += page.size
+                        if (page.size < 500) break
+                    }
+                }
+            }
+            if (ids.isEmpty()) {
+                _xmp.value = XmpExportState.Finished(XmpExportReport())
+                return@launch
+            }
+
+            if (sidecars && sidecarFolder == null) {
+                _xmp.value = XmpExportState.NeedsSidecarFolder(ids)
+                return@launch
+            }
+            if (embed) {
+                val uris = container.database.mediaDao().byIds(ids)
+                    .filter { XmpContainer.forMimeType(it.mime) != XmpContainer.Sidecar }
+                    .map { Uri.parse(it.uri) }
+                if (uris.isNotEmpty()) {
+                    _xmp.value = XmpExportState.NeedsWriteConsent(uris, ids)
+                    return@launch
+                }
+            }
+            runXmpExport(ids, allowEmbedding = embed)
+        }
+    }
+
+    fun onSidecarFolderChosen(uri: Uri) {
+        sidecarFolder = uri
+        val pending = (_xmp.value as? XmpExportState.NeedsSidecarFolder)?.pending
+        _xmp.value = XmpExportState.Idle
+        if (pending != null) beginXmpExport()
+    }
+
+    fun onWriteConsentGranted() {
+        val state = _xmp.value as? XmpExportState.NeedsWriteConsent ?: return
+        runXmpExport(state.pending, allowEmbedding = true)
+    }
+
+    fun onWriteConsentDenied() {
+        // Falling back to sidecars is the useful thing to do: the user said no to changing
+        // their originals, not no to exporting tags.
+        val state = _xmp.value as? XmpExportState.NeedsWriteConsent ?: return
+        if (sidecarFolder != null) {
+            runXmpExport(state.pending, allowEmbedding = false)
+        } else {
+            _xmp.value = XmpExportState.Idle
+        }
+    }
+
+    fun dismissXmp() {
+        _xmp.value = XmpExportState.Idle
+    }
+
+    private fun runXmpExport(ids: List<Long>, allowEmbedding: Boolean) {
+        _xmp.value = XmpExportState.Running(0, ids.size)
+        viewModelScope.launch {
+            val report = container.xmpWriteBack.exportTags(
+                mediaIds = ids,
+                allowEmbedding = allowEmbedding,
+                sidecarDirectory = sidecarFolder,
+            ) { done, total -> _xmp.value = XmpExportState.Running(done, total) }
+            _xmp.value = XmpExportState.Finished(report)
+        }
     }
 
     fun forgetMissing(onDone: (Int) -> Unit) {

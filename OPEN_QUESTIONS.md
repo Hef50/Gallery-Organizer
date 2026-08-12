@@ -63,6 +63,18 @@ when on it is a manual "export tags to files" action rather than something that 
 every tag edit. Sidecar writing is a separate, softer toggle since it never touches the
 original.
 
+Two limitations worth knowing about:
+
+- **HEIC is sidecar-only.** Embedding XMP in HEIF means inserting a `mime` item into the
+  ISO-BMFF `meta` box and rewriting the item location table — a whole-container rewrite
+  where a mistake produces an unopenable photo. Given that Samsung shoots HEIF by default
+  on some settings, this may matter more than it sounds. Worth the risk, or is a sidecar
+  fine?
+- **Sidecars need a folder grant.** `.xmp` is not a media type, so MediaStore will not
+  place one in `DCIM/`, and scoped storage will not let the app create an arbitrary file
+  there. The app asks for a folder via the system picker once and remembers it. Picking
+  `DCIM` keeps sidecars next to their photos; picking anything else does not.
+
 ---
 
 ### 6. What counts as "recently added"?

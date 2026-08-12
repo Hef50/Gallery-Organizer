@@ -12,6 +12,7 @@ import com.galleryorganizer.data.repo.MediaIndexer
 import com.galleryorganizer.data.repo.MediaRepository
 import com.galleryorganizer.data.repo.SearchRepository
 import com.galleryorganizer.data.repo.TagRepository
+import com.galleryorganizer.xmp.XmpWriteBack
 
 /**
  * The whole dependency graph. Everything is lazy so that nothing touches disk during
@@ -43,6 +44,8 @@ class AppContainer(context: Context) {
     val backupRepository: BackupRepository by lazy {
         BackupRepository(database, tagRepository, ftsMaintenance)
     }
+
+    val xmpWriteBack: XmpWriteBack by lazy { XmpWriteBack(appContext, database) }
 
     val mediaIndexer: MediaIndexer by lazy {
         MediaIndexer(mediaStoreSource, database, ftsMaintenance)
