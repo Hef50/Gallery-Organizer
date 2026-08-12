@@ -149,6 +149,32 @@ interface MediaDao {
     @Query("UPDATE media SET ocr_text = :text WHERE id = :id")
     suspend fun setOcrText(id: Long, text: String?)
 
+    // --- On-device analysis (P9) -------------------------------------------------------
+
+    @Query("UPDATE media SET auto_scan_state = :state WHERE id = :id")
+    suspend fun setAutoScanState(id: Long, state: Int)
+
+    /**
+     * Newest first: recent photos are the ones the user is most likely to be organising, so
+     * suggestions for them are worth more than suggestions for something from 2014.
+     * Videos are excluded — ML Kit here analyses still frames, and picking a representative
+     * frame from a video is a different problem.
+     */
+    @Query(
+        """
+        SELECT * FROM media
+        WHERE auto_scan_state = 0 AND is_missing = 0 AND is_video = 0
+        ORDER BY date_taken DESC LIMIT :limit
+        """,
+    )
+    suspend fun unanalysedItems(limit: Int): List<MediaEntity>
+
+    @Query("SELECT COUNT(*) FROM media WHERE auto_scan_state = 0 AND is_missing = 0 AND is_video = 0")
+    suspend fun unanalysedCount(): Int
+
+    @Query("UPDATE media SET auto_scan_state = 0")
+    suspend fun resetAutoScanState()
+
     /**
      * Refreshes only the columns MediaStore owns.
      *

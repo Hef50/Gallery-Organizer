@@ -12,13 +12,16 @@ import com.galleryorganizer.data.db.dao.MediaDao
 import com.galleryorganizer.data.db.dao.MediaFtsDao
 import com.galleryorganizer.data.db.dao.MediaTagDao
 import com.galleryorganizer.data.db.dao.SavedSearchDao
+import com.galleryorganizer.data.db.dao.SuggestionDao
 import com.galleryorganizer.data.db.dao.TagDao
 import com.galleryorganizer.data.db.entity.IndexStateEntity
+import com.galleryorganizer.data.db.entity.LabelSuggestionEntity
 import com.galleryorganizer.data.db.entity.MediaEntity
 import com.galleryorganizer.data.db.entity.MediaFtsEntity
 import com.galleryorganizer.data.db.entity.MediaTagCrossRef
 import com.galleryorganizer.data.db.entity.SavedSearchEntity
 import com.galleryorganizer.data.db.entity.TagEntity
+import com.galleryorganizer.data.db.entity.SuggestionStatus
 import com.galleryorganizer.data.db.entity.TagSource
 
 class Converters {
@@ -27,6 +30,12 @@ class Converters {
 
     @TypeConverter
     fun wireToTagSource(wire: String): TagSource = TagSource.fromWire(wire)
+
+    @TypeConverter
+    fun suggestionStatusToWire(status: SuggestionStatus): String = status.wire
+
+    @TypeConverter
+    fun wireToSuggestionStatus(wire: String): SuggestionStatus = SuggestionStatus.fromWire(wire)
 }
 
 @Database(
@@ -37,6 +46,7 @@ class Converters {
         SavedSearchEntity::class,
         IndexStateEntity::class,
         MediaFtsEntity::class,
+        LabelSuggestionEntity::class,
     ],
     version = AppDatabase.VERSION,
     exportSchema = true,
@@ -50,9 +60,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun mediaFtsDao(): MediaFtsDao
     abstract fun indexStateDao(): IndexStateDao
     abstract fun savedSearchDao(): SavedSearchDao
+    abstract fun suggestionDao(): SuggestionDao
 
     companion object {
-        const val VERSION = 2
+        const val VERSION = 3
         const val NAME = "gallery-organizer.db"
 
         fun build(context: Context): AppDatabase =

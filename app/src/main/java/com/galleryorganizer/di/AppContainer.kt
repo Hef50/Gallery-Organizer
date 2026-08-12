@@ -7,6 +7,8 @@ import com.galleryorganizer.data.db.AppDatabase
 import com.galleryorganizer.data.media.ContentResolverMediaStoreSource
 import com.galleryorganizer.data.media.MediaStoreSource
 import com.galleryorganizer.data.prefs.SettingsStore
+import com.galleryorganizer.data.ml.MlKitImageAnalyzer
+import com.galleryorganizer.data.repo.AutoTagger
 import com.galleryorganizer.data.repo.FtsMaintenance
 import com.galleryorganizer.data.repo.MediaIndexer
 import com.galleryorganizer.data.repo.MediaRepository
@@ -46,6 +48,23 @@ class AppContainer(context: Context) {
     }
 
     val xmpWriteBack: XmpWriteBack by lazy { XmpWriteBack(appContext, database) }
+
+    /**
+     * ML Kit clients hold native resources, so this one is created on demand and closed by
+     * the worker when it finishes rather than living for the process's lifetime.
+     */
+    private var analyzer: MlKitImageAnalyzer? = null
+
+    val autoTagger: AutoTagger
+        get() {
+            val current = analyzer ?: MlKitImageAnalyzer(appContext).also { analyzer = it }
+            return AutoTagger(database, current, tagRepository, ftsMaintenance)
+        }
+
+    fun closeAnalyzer() {
+        analyzer?.close()
+        analyzer = null
+    }
 
     val mediaIndexer: MediaIndexer by lazy {
         MediaIndexer(mediaStoreSource, database, ftsMaintenance)

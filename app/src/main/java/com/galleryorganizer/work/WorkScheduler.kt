@@ -82,6 +82,31 @@ object WorkScheduler {
         )
     }
 
+    /**
+     * On-device labelling and OCR. Charging *and* idle: this is the most expensive thing
+     * the app does, and it is never urgent.
+     */
+    fun enqueueAutoTag(context: Context) {
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            AUTO_TAG_WORK,
+            ExistingWorkPolicy.KEEP,
+            OneTimeWorkRequestBuilder<AutoTagWorker>()
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiresCharging(true)
+                        .setRequiresBatteryNotLow(true)
+                        .setRequiresDeviceIdle(true)
+                        .build(),
+                )
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, Duration.ofMinutes(15))
+                .build(),
+        )
+    }
+
+    fun cancelAutoTag(context: Context) {
+        WorkManager.getInstance(context).cancelUniqueWork(AUTO_TAG_WORK)
+    }
+
     /** True while an indexing pass is queued or running, for the UI's progress strip. */
     fun observeIndexing(context: Context): Flow<IndexingStatus> =
         WorkManager.getInstance(context)

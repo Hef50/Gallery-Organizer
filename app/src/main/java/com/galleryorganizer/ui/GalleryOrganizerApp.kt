@@ -36,6 +36,8 @@ import com.galleryorganizer.ui.search.GallerySearchBar
 import com.galleryorganizer.ui.search.SavedSearchRow
 import com.galleryorganizer.ui.settings.SettingsScreen
 import com.galleryorganizer.ui.settings.SettingsViewModel
+import com.galleryorganizer.ui.suggestions.SuggestionsScreen
+import com.galleryorganizer.ui.suggestions.SuggestionsViewModel
 import com.galleryorganizer.ui.tags.BulkTagSheet
 import com.galleryorganizer.ui.tags.TagManagerScreen
 import com.galleryorganizer.ui.tags.TagViewModel
@@ -47,6 +49,7 @@ object Routes {
     const val GALLERY = "gallery"
     const val TAGS = "tags"
     const val SETTINGS = "settings"
+    const val SUGGESTIONS = "suggestions"
 }
 
 @Composable
@@ -214,6 +217,16 @@ fun GalleryOrganizerApp() {
                 viewModel(factory = SettingsViewModel.Factory(container))
             SettingsScreen(
                 viewModel = settingsViewModel,
+                onBack = { navController.popBackStack() },
+                onOpenSuggestions = { navController.navigate(Routes.SUGGESTIONS) },
+            )
+        }
+
+        composable(Routes.SUGGESTIONS) {
+            val suggestionsViewModel: SuggestionsViewModel =
+                viewModel(factory = SuggestionsViewModel.Factory(container))
+            SuggestionsScreen(
+                viewModel = suggestionsViewModel,
                 onBack = { navController.popBackStack() },
             )
         }

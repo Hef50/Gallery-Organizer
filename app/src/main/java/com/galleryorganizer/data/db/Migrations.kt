@@ -34,4 +34,44 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
-val ALL_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2)
+/**
+ * v2 → v3: the suggestion queue for on-device auto-tagging, and `media.auto_scan_state`.
+ *
+ * The column defaults to 0 ("not looked at yet") so every existing row is simply queued
+ * for analysis. Nothing is read, rewritten or dropped, so no tag can be lost here either.
+ * The `label_suggestion` DDL is copied verbatim from Room's generated v3 schema — an index
+ * name or a collation that differs by one character makes Room reject the database at
+ * startup, and the migration test is what proves it does not.
+ */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "ALTER TABLE `media` ADD COLUMN `auto_scan_state` INTEGER NOT NULL DEFAULT 0",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_media_auto_scan_state` " +
+                "ON `media` (`auto_scan_state`)",
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `label_suggestion` (" +
+                "`media_id` INTEGER NOT NULL, " +
+                "`label` TEXT NOT NULL COLLATE NOCASE, " +
+                "`confidence` REAL NOT NULL, " +
+                "`status` TEXT NOT NULL, " +
+                "`created_at` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`media_id`, `label`), " +
+                "FOREIGN KEY(`media_id`) REFERENCES `media`(`id`) " +
+                "ON UPDATE NO ACTION ON DELETE CASCADE )",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_label_suggestion_status_label` " +
+                "ON `label_suggestion` (`status`, `label`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_label_suggestion_label` " +
+                "ON `label_suggestion` (`label`)",
+        )
+    }
+}
+
+val ALL_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)

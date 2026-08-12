@@ -433,3 +433,49 @@ affected files. That is not something the app can or should route around, and it
 write-back is a manual action rather than something that fires on every tag edit. If the
 user declines, the export falls back to sidecars where possible — they said no to changing
 their originals, not no to exporting tags.
+
+---
+
+## P9 — On-device suggestions
+
+### Labels are suggestions; OCR text is not
+"Beach" is a guess and belongs in a review queue. The text visible in a photograph is a
+*fact about the file* — it cannot be wrong in the way a label can — and it only ever makes
+search better, so it goes straight into `media.ocr_text` and the FTS index without review.
+
+### The review queue is grouped by label, not by photo
+"Beach — 340 photos, tag them?" is one decision. Item-by-item review of a 150k library is
+not a feature, it is a punishment. Accepting part of a label is still possible for when the
+grouping is too coarse.
+
+### Rejections are kept, not deleted
+A rejected suggestion row stays as `status = rejected`. Deleting it is exactly what would
+let the next scan offer the same wrong guess again. `label_suggestion` inserts are IGNORE
+for the same reason. There is a "forget rejections" escape hatch for after a threshold
+change.
+
+### `media.auto_scan_state` rather than "has suggestions"
+"We looked and found nothing" and "we have not looked yet" are different states. Inferring
+the first from an empty suggestion list would make the worker re-analyse every featureless
+photo on every run, forever. A file that cannot be decoded is marked *failed* for the same
+reason.
+
+### ML Kit models are bundled, not downloaded
+The app has no `INTERNET` permission and never will. Bundled models cost a few MB of APK
+and buy analysis that works on a plane, on day one. The clients hold native resources, so
+`AppContainer` creates the analyser on demand and the worker closes it when it finishes
+rather than holding it for the process lifetime.
+
+### Images are decoded at ~1280 px for analysis
+A 200 MP original decoded at full size is a bitmap of roughly 800 MB. Labels are stable
+around a thousand pixels, and OCR needs enough resolution for glyphs but nothing like the
+full frame, so a two-pass bounds-then-sample decode is used.
+
+### Analysis runs only while charging *and* idle
+It is the most expensive thing the app does and it is never urgent. Each item commits on
+its own, so being stopped costs at most one photo's work, and the worker re-enqueues itself
+rather than monopolising a single execution window.
+
+### ML Kit sits behind an `ImageAnalyzer` interface
+Which is what lets every rule above — thresholds, deduplication, what happens to a failure,
+what accepting does to a manual tag — be tested on the JVM with no device and no model.

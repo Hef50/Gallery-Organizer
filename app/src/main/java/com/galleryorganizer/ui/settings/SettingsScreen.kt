@@ -45,6 +45,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel,
     onBack: () -> Unit,
     onOpenDuplicates: () -> Unit = {},
+    onOpenSuggestions: () -> Unit = {},
 ) {
     val transfer by viewModel.transfer.collectAsStateWithLifecycle()
     val xmpState by viewModel.xmp.collectAsStateWithLifecycle()
@@ -59,6 +60,7 @@ fun SettingsScreen(
     var confirmingForget by remember { mutableStateOf(false) }
     var confirmingRebuild by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
@@ -181,13 +183,27 @@ fun SettingsScreen(
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SectionHeader("Suggestions")
+            SettingRow(
+                title = "Review suggested tags",
+                subtitle = "Nothing is applied until you accept it",
+                onClick = onOpenSuggestions,
+            )
             ToggleRow(
                 title = "Suggest tags automatically",
                 subtitle = "Runs on-device while charging. Suggestions are never applied " +
                     "until you accept them. Currently at %.0f%% confidence."
                         .format(confidence * 100),
                 checked = autoTag,
-                onCheckedChange = { scope.launch { viewModel.settings.setAutoTagEnabled(it) } },
+                onCheckedChange = { on ->
+                    scope.launch {
+                        viewModel.settings.setAutoTagEnabled(on)
+                        if (on) {
+                            com.galleryorganizer.work.WorkScheduler.enqueueAutoTag(context)
+                        } else {
+                            com.galleryorganizer.work.WorkScheduler.cancelAutoTag(context)
+                        }
+                    }
+                },
             )
 
             Spacer(Modifier.height(32.dp))

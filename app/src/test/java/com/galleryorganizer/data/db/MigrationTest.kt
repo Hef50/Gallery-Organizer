@@ -142,6 +142,69 @@ class MigrationTest {
     }
 
     @Test
+    fun `v2 to v3 adds the suggestion queue and queues every existing item for analysis`() =
+        runTest {
+            seedSchema(version = 2) {
+                execSQL(
+                    """
+                    INSERT INTO media (id, content_hash, mediastore_id, uri, display_name,
+                        relative_path, bucket_id, bucket_name, mime, is_video, size, date_taken,
+                        date_modified, date_added, date_first_indexed, duration, width, height,
+                        orientation, is_missing, ocr_text)
+                    VALUES (1, 'deadbeef', 42, 'content://media/external/images/media/42',
+                        'IMG_0042.jpg', 'DCIM/Camera/', 7, 'Camera', 'image/jpeg', 0, 123456,
+                        1700000000000, 1700000000, 1700000000, 1700000000000, 0, 4032, 3024,
+                        0, 0, 'a receipt')
+                    """.trimIndent(),
+                )
+                execSQL("INSERT INTO tag (id, name, parent_id, color, last_used_at, usage_count) VALUES (1, 'Travel', 0, NULL, 0, 0)")
+                execSQL("INSERT INTO media_tag (media_id, tag_id, source, created_at) VALUES (1, 1, 'manual', 1)")
+            }
+
+            val db = openThroughRoom()
+
+            // Room validates the whole schema on open, so this passing means the migration's
+            // hand-written DDL matches Room's generated v3 exactly — one character of drift
+            // in an index name or a collation and the app would refuse to start.
+            assertThat(db.suggestionDao().count()).isEqualTo(0)
+
+            val item = db.mediaDao().byContentHash("deadbeef")!!
+            // Default 0 = "not looked at yet", so existing rows simply join the queue.
+            assertThat(item.autoScanState)
+                .isEqualTo(com.galleryorganizer.data.db.entity.MediaEntity.AUTO_SCAN_PENDING)
+            assertThat(item.ocrText).isEqualTo("a receipt")
+            assertThat(db.mediaTagDao().tagsFor(item.id).map { it.name }).containsExactly("Travel")
+            assertThat(db.mediaDao().unanalysedCount()).isEqualTo(1)
+        }
+
+    @Test
+    fun `a v1 database migrates all the way to the current version in one open`() = runTest {
+        seedSchema(version = 1) {
+            execSQL(
+                """
+                INSERT INTO media (id, content_hash, mediastore_id, uri, display_name,
+                    relative_path, bucket_id, bucket_name, mime, is_video, size, date_taken,
+                    date_modified, date_added, date_first_indexed, duration, width, height,
+                    orientation, is_missing, ocr_text)
+                VALUES (1, 'deadbeef', 42, 'content://media/external/images/media/42',
+                    'IMG_0042.jpg', 'DCIM/Camera/', 7, 'Camera', 'image/jpeg', 0, 123456,
+                    1700000000000, 1700000000, 1700000000, 1700000000000, 0, 4032, 3024,
+                    0, 0, NULL)
+                """.trimIndent(),
+            )
+            execSQL("INSERT INTO tag (id, name, parent_id, color, last_used_at, usage_count) VALUES (1, 'Travel', 0, NULL, 0, 0)")
+            execSQL("INSERT INTO media_tag (media_id, tag_id, source, created_at) VALUES (1, 1, 'manual', 1)")
+        }
+
+        val db = openThroughRoom()
+
+        assertThat(db.openHelper.readableDatabase.version).isEqualTo(AppDatabase.VERSION)
+        assertThat(db.mediaTagDao().count()).isEqualTo(1)
+        assertThat(db.mediaDao().bySizeAndName(123456, "IMG_0042.jpg")).hasSize(1)
+        assertThat(db.suggestionDao().count()).isEqualTo(0)
+    }
+
+    @Test
     fun `every registered migration forms an unbroken chain up to the current version`() {
         if (ALL_MIGRATIONS.isEmpty()) {
             assertThat(AppDatabase.VERSION).isEqualTo(1)

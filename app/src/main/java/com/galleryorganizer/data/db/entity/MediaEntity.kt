@@ -30,6 +30,7 @@ import androidx.room.PrimaryKey
         // ever hashed can only be found again by (size, name), and that lookup runs once
         // per backed-up item. Without the index it is a full table scan each time.
         Index(value = ["size", "display_name"]),
+        Index(value = ["auto_scan_state"]),
     ],
 )
 data class MediaEntity(
@@ -131,4 +132,21 @@ data class MediaEntity(
     /** Filled by the P9 OCR worker. Indexed by `media_fts` from v1 onward. */
     @ColumnInfo(name = "ocr_text")
     val ocrText: String? = null,
-)
+
+    /**
+     * How far on-device analysis has got with this item, added in schema v3.
+     * 0 = not looked at, 1 = analysed, 2 = analysis failed (a corrupt or unreadable file).
+     *
+     * Stored on the row rather than derived from whether suggestions exist, because "we
+     * looked and found nothing" and "we have not looked yet" are different states and
+     * conflating them would make the worker re-analyse every featureless photo forever.
+     */
+    @ColumnInfo(name = "auto_scan_state")
+    val autoScanState: Int = AUTO_SCAN_PENDING,
+) {
+    companion object {
+        const val AUTO_SCAN_PENDING = 0
+        const val AUTO_SCAN_DONE = 1
+        const val AUTO_SCAN_FAILED = 2
+    }
+}
