@@ -203,3 +203,49 @@ is treated as optional: without it, indexing runs exactly the same, just quietly
 MediaStore will not tell you how many rows match without running the query, so any
 denominator would have to be a guess that jumps around as it is refined. An item count
 that ticks up is honest; a percentage that goes backwards is not.
+
+---
+
+## P4 — The grid
+
+### Date headers come from `PagingData.insertSeparators`
+The obvious way to build a date-sectioned grid is to walk the list, compare each item's
+day with the previous one, and splice in headers. That needs the whole list. Paging 3's
+`insertSeparators` does the same job *inside* the paged stream, including correctly at
+page boundaries, so sections exist without ever materialising 150k rows. The logic is a
+top-level `withDateHeaders` rather than a lump inside the view model, so the page-boundary
+cases are directly testable.
+
+### Selection is a set of database ids, never grid indices
+Indices shift when a page loads, when the indexer inserts a row, or when a filter changes.
+An index-based selection silently starts pointing at different photos. Ids do not move.
+
+### The drag is recomputed from its anchor on every move
+`extendDrag` replaces the drag's contribution rather than accumulating it, so dragging
+back over items deselects them and an overshoot is correctable without lifting a finger.
+The selection that existed *before* the drag is kept separately and always survives.
+
+### The drag gesture lives on the grid, not on the cells
+A `pointerInput` on each cell stops receiving events the moment the finger leaves that
+cell — which is the entire gesture. The grid resolves which cell is under the pointer from
+`LazyGridState.layoutInfo`, falls back to the nearest cell when the finger is in the gap
+between two (diagonal drags spend a lot of time there), and disables normal scrolling for
+the duration so the gesture cannot fight the list.
+
+### Auto-scroll is a loop, not a reaction to drag events
+Once the finger stops moving inside the edge hot zone there are no more pointer events, so
+event-driven auto-scroll stalls exactly when the user is holding still at the edge waiting
+for the list to come to them. A separate coroutine scrolls at a speed that ramps with how
+far into the zone the finger is.
+
+### Thumbnails come from `ContentResolver.loadThumbnail`, not from decoding the original
+A 200 MP S25 Ultra JPEG is tens of megabytes; even a subsampled decode costs a large
+transient allocation per cell. A custom Coil `Fetcher` asks MediaStore for the thumbnail
+it has already generated and cached, and only falls back to streaming (and subsampling)
+the original when there is not one. That is the difference between a grid that flings and
+one that hitches.
+
+### `peek` for selection, `get` for rendering
+`LazyPagingItems.get` tells Paging to load around that index. A drag passing over a
+hundred indices would trigger a hundred loads the user never asked for, so every
+selection-time lookup uses `peek`.

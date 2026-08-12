@@ -1,5 +1,6 @@
 package com.galleryorganizer.data.db.dao
 
+import androidx.paging.PagingSource
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -48,6 +49,32 @@ interface MediaDao {
 
     @Update
     suspend fun updateAll(items: List<MediaEntity>)
+
+    /**
+     * The grid, newest first. A Room [androidx.paging.PagingSource] so the UI never holds
+     * more than a few screens of rows — at 150k items a `List<MediaEntity>` would be tens
+     * of megabytes and several seconds of query time.
+     *
+     * `date_taken DESC, id DESC` matches `index_media_date_taken`; `id` only breaks ties
+     * so that paging is stable when a hundred photos share a timestamp.
+     */
+    @Query(
+        """
+        SELECT * FROM media
+        WHERE (is_missing = 0 OR :includeMissing)
+        ORDER BY date_taken DESC, id DESC
+        """,
+    )
+    fun pagingSourceAll(includeMissing: Boolean): PagingSource<Int, MediaEntity>
+
+    /** Ids in grid order, for "select all" over a bounded result. */
+    @Query(
+        """
+        SELECT id FROM media WHERE is_missing = 0
+        ORDER BY date_taken DESC, id DESC LIMIT :limit
+        """,
+    )
+    suspend fun allIdsInGridOrder(limit: Int): List<Long>
 
     @Query("SELECT * FROM media WHERE id = :id")
     suspend fun byId(id: Long): MediaEntity?
