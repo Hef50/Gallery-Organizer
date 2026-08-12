@@ -20,6 +20,7 @@ import com.galleryorganizer.permissions.MediaAccess
 import com.galleryorganizer.ui.permissions.MediaPermissionScreen
 import com.galleryorganizer.ui.permissions.rememberMediaPermissionController
 import com.galleryorganizer.ui.permissions.rememberMediaPermissionState
+import com.galleryorganizer.work.WorkScheduler
 import kotlinx.coroutines.launch
 
 @Composable
@@ -51,9 +52,17 @@ fun GalleryOrganizerApp() {
             onOpenSettings = controller::openAppSettings,
         )
 
-        MediaAccess.Partial, MediaAccess.Full -> Surface(modifier = Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Gallery Organizer")
+        MediaAccess.Partial, MediaAccess.Full -> {
+            // A catch-up pass, not a rescan: the indexer only reads past its watermark,
+            // so on a quiet day this reads a handful of rows.
+            LaunchedEffect(permissions.access) {
+                WorkScheduler.enqueueIndex(context)
+                WorkScheduler.enqueuePeriodicIndex(context)
+            }
+            Surface(modifier = Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Gallery Organizer")
+                }
             }
         }
     }

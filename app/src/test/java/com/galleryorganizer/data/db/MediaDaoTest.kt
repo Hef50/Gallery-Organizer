@@ -59,22 +59,50 @@ class MediaDaoTest : DbTest() {
     }
 
     @Test
-    fun `marking missing keeps the row and is bounded by the watermark`() = runTest {
-        media.insertAll(
-            listOf(
-                sampleMedia(1, dateModified = 100),
-                sampleMedia(2, dateModified = 200),
-                // Beyond the point the pass reached: must not be touched, because a
-                // resumed pass has not looked at it yet.
-                sampleMedia(3, dateModified = 900),
-            ),
+    fun `the presence projection pages through the whole table`() = runTest {
+        media.insertAll((1L..5L).map { sampleMedia(it, isMissing = it % 2L == 0L) })
+
+        val first = media.presencePage(limit = 3, offset = 0)
+        val second = media.presencePage(limit = 3, offset = 3)
+
+        assertThat(first).hasSize(3)
+        assertThat(second).hasSize(2)
+        assertThat((first + second).map { it.mediaStoreId }).containsExactly(1L, 2L, 3L, 4L, 5L)
+        assertThat((first + second).filter { it.isMissing }.map { it.mediaStoreId })
+            .containsExactly(2L, 4L)
+    }
+
+    @Test
+    fun `refreshing from mediastore never clobbers app-owned columns`() = runTest {
+        val id = media.insert(sampleMedia(1, contentHash = "keep-me", ocrText = "receipt total"))
+
+        media.updateFromMediaStore(
+            id = id,
+            mediaStoreId = 1,
+            uri = "content://media/external/images/media/1",
+            displayName = "renamed.jpg",
+            relativePath = "Pictures/Moved/",
+            bucketId = 9,
+            bucketName = "Moved",
+            mime = "image/jpeg",
+            isVideo = false,
+            size = 2_000_000,
+            dateTaken = 1_800_000_000_000,
+            dateModified = 1_800_000_000,
+            dateAdded = 1_800_000_000,
+            duration = 0,
+            width = 100,
+            height = 200,
+            orientation = 90,
         )
 
-        val flagged = media.markMissingOutside(seenMediaStoreIds = listOf(1L), throughDateModified = 500)
-
-        assertThat(flagged).isEqualTo(1)
-        assertThat(media.count()).isEqualTo(3) // nothing deleted
-        assertThat(media.missingItems().map { it.mediaStoreId }).containsExactly(2L)
+        val row = media.byId(id)!!
+        assertThat(row.displayName).isEqualTo("renamed.jpg")
+        assertThat(row.bucketName).isEqualTo("Moved")
+        // The whole point: a file move must not cost the user their identity hash or OCR.
+        assertThat(row.contentHash).isEqualTo("keep-me")
+        assertThat(row.ocrText).isEqualTo("receipt total")
+        assertThat(row.dateFirstIndexed).isEqualTo(1_700_000_000_000L)
     }
 
     @Test

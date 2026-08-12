@@ -3,7 +3,12 @@ package com.galleryorganizer.di
 import android.content.Context
 import com.galleryorganizer.GalleryOrganizerApp
 import com.galleryorganizer.data.db.AppDatabase
+import com.galleryorganizer.data.media.ContentResolverMediaStoreSource
+import com.galleryorganizer.data.media.MediaStoreSource
 import com.galleryorganizer.data.prefs.SettingsStore
+import com.galleryorganizer.data.repo.FtsMaintenance
+import com.galleryorganizer.data.repo.MediaIndexer
+import com.galleryorganizer.data.repo.MediaRepository
 
 /**
  * The whole dependency graph. Everything is lazy so that nothing touches disk during
@@ -17,6 +22,20 @@ class AppContainer(context: Context) {
     val database: AppDatabase by lazy { AppDatabase.build(appContext) }
 
     val settings: SettingsStore by lazy { SettingsStore(appContext) }
+
+    val ftsMaintenance: FtsMaintenance by lazy { FtsMaintenance(database) }
+
+    val mediaStoreSource: MediaStoreSource by lazy {
+        ContentResolverMediaStoreSource(appContext.contentResolver)
+    }
+
+    val mediaRepository: MediaRepository by lazy {
+        MediaRepository(database, appContext.contentResolver)
+    }
+
+    val mediaIndexer: MediaIndexer by lazy {
+        MediaIndexer(mediaStoreSource, database, ftsMaintenance)
+    }
 
     companion object {
         fun from(context: Context): AppContainer =

@@ -22,6 +22,13 @@ data class MediaIndexRow(
     @androidx.room.ColumnInfo(name = "is_missing") val isMissing: Boolean,
 )
 
+/** Just enough for the presence sweep to decide whether a row is still backed by a file. */
+data class MediaPresenceRow(
+    val id: Long,
+    @androidx.room.ColumnInfo(name = "mediastore_id") val mediaStoreId: Long,
+    @androidx.room.ColumnInfo(name = "is_missing") val isMissing: Boolean,
+)
+
 /** Just enough to open and hash a file. */
 data class MediaHashTarget(
     val id: Long,
@@ -91,17 +98,46 @@ interface MediaDao {
     suspend fun setOcrText(id: Long, text: String?)
 
     /**
-     * Rows the indexer did not see in this pass. Never deletes — see DECISIONS.md.
-     * Scoped by `date_modified` so a partial (resumed) pass cannot flag the whole library.
+     * Refreshes only the columns MediaStore owns.
+     *
+     * Deliberately not `@Update` on the whole entity: `content_hash`, `date_first_indexed`
+     * and `ocr_text` belong to the app, and a whole-row update is one forgotten field away
+     * from a rescan quietly wiping the OCR text or the identity hash of every item.
      */
     @Query(
         """
-        UPDATE media SET is_missing = 1
-        WHERE is_missing = 0 AND mediastore_id NOT IN (:seenMediaStoreIds)
-          AND date_modified <= :throughDateModified
+        UPDATE media SET
+            mediastore_id = :mediaStoreId, uri = :uri, display_name = :displayName,
+            relative_path = :relativePath, bucket_id = :bucketId, bucket_name = :bucketName,
+            mime = :mime, is_video = :isVideo, size = :size, date_taken = :dateTaken,
+            date_modified = :dateModified, date_added = :dateAdded, duration = :duration,
+            width = :width, height = :height, orientation = :orientation, is_missing = 0
+        WHERE id = :id
         """,
     )
-    suspend fun markMissingOutside(seenMediaStoreIds: List<Long>, throughDateModified: Long): Int
+    suspend fun updateFromMediaStore(
+        id: Long,
+        mediaStoreId: Long,
+        uri: String,
+        displayName: String,
+        relativePath: String,
+        bucketId: Long,
+        bucketName: String,
+        mime: String,
+        isVideo: Boolean,
+        size: Long,
+        dateTaken: Long,
+        dateModified: Long,
+        dateAdded: Long,
+        duration: Long,
+        width: Int,
+        height: Int,
+        orientation: Int,
+    )
+
+    /** Paged presence projection for the indexer's missing-file sweep. */
+    @Query("SELECT id, mediastore_id, is_missing FROM media ORDER BY id LIMIT :limit OFFSET :offset")
+    suspend fun presencePage(limit: Int, offset: Int): List<MediaPresenceRow>
 
     @Query("UPDATE media SET is_missing = 1 WHERE id IN (:ids)")
     suspend fun markMissing(ids: List<Long>)

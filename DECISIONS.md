@@ -157,3 +157,49 @@ assets, which is awkward without a device. `SchemaBundle` instead reads the comm
 statements, and writes `room_master_table` with the recorded identity hash. Opening that
 database through Room then validates the identity hash for free, so editing an entity
 without bumping the version makes `MigrationTest` fail rather than silently shipping.
+
+---
+
+## P3 — Indexing
+
+### The watermark is `(date_modified, _id)`, not `date_modified`
+A timestamp alone is not a safe resume point. A burst of shots — or any bulk copy — lands
+dozens of files in the same second, so resuming at `date_modified > watermark` would skip
+the rest of that second, and `>=` would re-read it forever. Carrying `_id` makes the
+cursor a total order over the collection and the resume exact.
+
+### Rows and the watermark commit in the same transaction
+The chunk's inserts, its FTS rows and the advanced watermark are one transaction. Split
+into two, a crash in between either skips a chunk permanently (watermark first) or
+re-reads it every launch (rows first).
+
+### The scan holds one cursor open instead of paging with LIMIT/OFFSET
+A fresh `LIMIT`/`OFFSET` query per batch makes MediaStore re-sort the whole collection
+each time, turning a 150k-item pass into an O(n²) crawl. One cursor, read forward, is
+what `CursorWindow` is for.
+
+### Missing files are found by a set difference in memory, not `NOT IN (...)`
+SQLite binds at most 999 variables by default, so a 150k-id `NOT IN` clause simply cannot
+be expressed, and chunking it would cost a full table scan per chunk. The sweep pulls an
+id-only projection from both sides and diffs them; 150k longs is about 1.2 MB for one
+pass. The sweep also refuses to act when MediaStore returns *nothing* while the database
+is non-empty — a revoked permission or an unmounted volume looks exactly like an empty
+library, and flagging the whole library on that would be alarming.
+
+### The indexer only refreshes MediaStore's own columns
+`updateFromMediaStore` names each column explicitly instead of `@Update`-ing the whole
+entity, because `content_hash`, `date_first_indexed` and `ocr_text` belong to the app. A
+whole-row update is one forgotten field away from a rescan silently wiping every item's
+identity hash and OCR text.
+
+### A posted notification, not `setForeground`
+A foreground worker on Android 14+ needs `FOREGROUND_SERVICE` and
+`FOREGROUND_SERVICE_DATA_SYNC` in the manifest. The pass is fully resumable — being
+stopped costs at most one 500-row chunk — so it runs as an ordinary worker with a plain
+low-importance progress notification, and the manifest stays minimal. `POST_NOTIFICATIONS`
+is treated as optional: without it, indexing runs exactly the same, just quietly.
+
+### The progress bar is indeterminate
+MediaStore will not tell you how many rows match without running the query, so any
+denominator would have to be a guess that jumps around as it is refined. An item count
+that ticks up is honest; a percentage that goes backwards is not.

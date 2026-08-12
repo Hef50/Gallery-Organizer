@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">Gallery Organizer</string>
+
+    <string name="notification_channel_indexing">Indexing</string>
+    <string name="notification_channel_indexing_description">Progress while the app catches up with your photo library.</string>
+    <string name="notification_indexing_title">Indexing your library</string>
+    <plurals name="notification_indexing_progress">
+        <item quantity="one">%d item scanned</item>
+        <item quantity="other">%d items scanned</item>
+    </plurals>
 </resources>
