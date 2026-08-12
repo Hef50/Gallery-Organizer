@@ -13,6 +13,7 @@ import com.galleryorganizer.di.AppContainer
 import com.galleryorganizer.domain.search.SearchQuery
 import com.galleryorganizer.domain.search.SortOrder
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -28,7 +29,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
-@OptIn(ExperimentalCoroutinesApi::class)
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class GalleryViewModel(
     private val container: AppContainer,
     private val zone: ZoneId = ZoneId.systemDefault(),

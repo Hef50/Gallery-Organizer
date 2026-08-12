@@ -38,12 +38,12 @@ tasks.named("preBuild") { dependsOn(prepareDebugKeystore) }
 
 android {
     namespace = "com.galleryorganizer"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.galleryorganizer"
         minSdk = 33
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.11.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

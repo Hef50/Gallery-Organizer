@@ -35,8 +35,8 @@ abstract class DbTest {
             .allowMainThreadQueries()
             .addCallback(
                 object : androidx.room.RoomDatabase.Callback() {
-                    override fun onOpen(connection: androidx.sqlite.db.SupportSQLiteDatabase) {
-                        connection.execSQL("PRAGMA foreign_keys = ON")
+                    override fun onOpen(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("PRAGMA foreign_keys = ON")
                     }
                 },
             )
