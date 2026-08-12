@@ -112,6 +112,10 @@ geocoding, and the map draws no tiles. See `DECISIONS.md`.
 - Work phase by phase; one commit (or set) per phase, clearly described, never bundled.
 - Every phase ships unit tests that run on the JVM with no device — the sandbox has no
   emulator. `./gradlew testDebugUnitTest` must pass.
+- **Anything that touches the grid, the viewer or a paged list must keep `AppLaunchTest`
+  green.** It starts the real activity and is the only test that sees the empty first frame,
+  which is the state every launch passes through and the one that unit tests of the parts
+  never visit. A crash there is a crash on the user's phone.
 - CI (`.github/workflows/build.yml`) runs unit tests, `assembleDebug`, and uploads
   `app-debug.apk` as an artifact so the phone can install it directly.
 - Append every non-obvious decision and trade-off to `DECISIONS.md`.
@@ -123,7 +127,7 @@ geocoding, and the map draws no tiles. See `DECISIONS.md`.
 ## Build commands
 
 ```bash
-./gradlew testDebugUnitTest     # 282 JVM unit tests — must always pass
+./gradlew testDebugUnitTest     # 294 JVM unit tests — must always pass
 ./gradlew lintDebug             # must be clean; CI fails on any lint error
 ./gradlew assembleDebug         # app/build/outputs/apk/debug/app-debug.apk (~95 MB, arm64)
 ```

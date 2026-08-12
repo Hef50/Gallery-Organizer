@@ -238,11 +238,15 @@ only the app's own database.
 ## 6. Running the tests
 
 ```bash
-./gradlew testDebugUnitTest   # 282 tests, JVM only, no device needed
+./gradlew testDebugUnitTest   # 294 tests, JVM only, no device needed
 ./gradlew lintDebug           # must be clean
 ```
 
 Both also run on every push — see `.github/workflows/build.yml`.
+
+`AppLaunchTest` drives the real activity under Robolectric in three states — nothing granted,
+granted with an empty library, granted with a library indexed — so a crash on the first frame
+fails the build rather than the phone. It exists because one shipped anyway.
 
 Notably absent: instrumented tests. Everything is covered on the JVM instead — Robolectric
 for the real Room database, a fake `ContentProvider` for MediaStore, synthetic JPEG and PNG

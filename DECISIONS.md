@@ -778,3 +778,31 @@ by when this app first saw a file — so a photo from 2014 restored last week si
 and a rail labelled with years would be describing something the grid is not doing. A library
 spanning a single month gets no slider either: a control that cannot go anywhere invites a
 gesture that does nothing.
+
+---
+
+## A launch-crash test, added the hard way
+
+A build shipped that crashed on every launch. The cause was one unbounded index: the date
+slider read the date of the topmost visible photo by scanning forward from the first visible
+index, and Paging's `peek` *throws* for an index it does not hold rather than returning null.
+The paged list is empty on the first frame, so `peek(0)` threw before a single photo could
+be drawn.
+
+Two hundred and ninety-one tests were green. None of them opened the app.
+
+`AppLaunchTest` now drives the real `MainActivity` through the real `Application` under
+Robolectric, in three states: nothing granted, granted with an empty library, and granted
+with a library already indexed. It exercises the whole first frame — the container, Room, the
+permission gate, the paged grid, the slider, and every `LaunchedEffect` that runs on
+composition.
+
+It was verified the only way a regression test is worth anything: by putting the bug back and
+watching it fail with the exact exception the phone produced —
+`IndexOutOfBoundsException: Illegal attempt to access index 0 in ItemSnapshotList of size 0`.
+
+The general lesson is worth writing down, because this codebase invites the mistake. Testing
+every piece in isolation says nothing about whether the pieces compose, and this app's UI is
+assembled from paged lists whose contents arrive *after* the first frame. The empty first
+frame is a real state that every screen passes through on every launch, and it is exactly the
+state that unit tests of the parts never visit.
