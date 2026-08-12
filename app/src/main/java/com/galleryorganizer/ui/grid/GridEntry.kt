@@ -58,3 +58,7 @@ fun Flow<PagingData<MediaEntity>>.withDateHeaders(
 }
 
 private fun GridEntry.Item.day(zone: ZoneId): LocalDate = media.localDay(zone)
+
+/** For sorts where a date heading would be meaningless, such as "largest first". */
+fun Flow<PagingData<MediaEntity>>.withoutHeaders(): Flow<PagingData<GridEntry>> =
+    map { data -> data.map<MediaEntity, GridEntry> { GridEntry.Item(it) } }

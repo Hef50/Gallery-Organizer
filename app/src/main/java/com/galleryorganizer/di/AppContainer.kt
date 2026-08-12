@@ -9,6 +9,7 @@ import com.galleryorganizer.data.prefs.SettingsStore
 import com.galleryorganizer.data.repo.FtsMaintenance
 import com.galleryorganizer.data.repo.MediaIndexer
 import com.galleryorganizer.data.repo.MediaRepository
+import com.galleryorganizer.data.repo.SearchRepository
 import com.galleryorganizer.data.repo.TagRepository
 
 /**
@@ -35,6 +36,8 @@ class AppContainer(context: Context) {
     }
 
     val tagRepository: TagRepository by lazy { TagRepository(database, ftsMaintenance) }
+
+    val searchRepository: SearchRepository by lazy { SearchRepository(database) }
 
     val mediaIndexer: MediaIndexer by lazy {
         MediaIndexer(mediaStoreSource, database, ftsMaintenance)

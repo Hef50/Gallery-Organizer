@@ -292,3 +292,53 @@ Allowing it would detach the whole branch from every root: the rows would still 
 still hold assignments and still block name reuse, but nothing would ever render them.
 `buildTagTree` also defends the read side — orphans and cycle-stranded tags are promoted to
 roots rather than silently disappearing.
+
+---
+
+## P6 — Search
+
+### The grid *is* the search results
+There is no separate search screen. The gallery is driven by a `SearchQuery`, and an empty
+query means "everything". That means saved searches open in the same grid with the same
+selection and bulk-tag machinery, rather than a second, weaker copy of it.
+
+### `@RawQuery` with `observedEntities`
+Tag AND/OR/NOT × date range × folder × media type × full text is a genuinely dynamic filter
+shape; there is no finite set of `@Query` methods that covers it. `observedEntities` is
+what keeps the paged results live — tag an item and the filtered grid updates itself
+without anything having to remember to refresh.
+
+### Tag filters are `EXISTS` subqueries, not joins
+Joining `media_tag` multiplies rows per matching tag and forces a `DISTINCT` over the whole
+result — a temp B-tree instead of an index scan, at 150k rows. `EXISTS` short-circuits on
+the first match and leaves the outer query a plain scan of `media`. AND is one `EXISTS` per
+required tag (a single `EXISTS` over all the ids would be an OR wearing an AND's clothes);
+OR and NOT are one `EXISTS` / `NOT EXISTS` over the union.
+
+### User text is never passed to `MATCH` as-is
+FTS4 treats `"`, `*`, `-`, `^`, `:` and `OR`/`AND`/`NEAR` as syntax, so searching for
+`mum's "best"` would be a syntax error rather than a search. Input is tokenised on anything
+that is not a letter or digit — which keeps CJK working, since those are letters — and each
+token becomes a prefix term, so "kyo" already finds "Kyoto". Blank or punctuation-only
+input produces no clause at all rather than accidentally matching everything or nothing.
+
+### Saved searches are JSON, and decoding never throws
+`saved_search.query_json` means the query language can gain a field without a migration and
+without invalidating searches the user already saved. Every field has a default so an old
+saved search still deserialises, unknown keys are ignored so one written by a newer build
+still opens, and anything unparseable degrades to "everything" — a corrupt row must not be
+able to break the screen that lists them.
+
+### Typing is debounced; sorting is not a filter
+Every keystroke would otherwise cancel a Pager and start a fresh FTS query over 150k rows.
+Clearing the box skips the debounce, because waiting to see your library again feels broken.
+`SearchQuery.isEmpty` deliberately ignores `sort`: changing the order does not mean the user
+is looking at a filtered subset, and the UI should not claim they are.
+
+### Date headers only appear for chronological sorts
+"Largest first" broken up by date headings would be nonsense, so that sort renders a plain
+grid.
+
+### "Select all results" is capped at 10,000
+Selecting 150k items produces a `Set<Long>` the selection bar can do nothing sensible with,
+and a bulk tag at that scale deserves to be a deliberate act rather than an accidental one.

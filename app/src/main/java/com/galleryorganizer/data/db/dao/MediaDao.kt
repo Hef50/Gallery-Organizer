@@ -5,8 +5,12 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.RawQuery
 import androidx.room.Update
+import androidx.sqlite.db.SupportSQLiteQuery
 import com.galleryorganizer.data.db.entity.MediaEntity
+import com.galleryorganizer.data.db.entity.MediaTagCrossRef
+import com.galleryorganizer.data.db.entity.TagEntity
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -66,6 +70,27 @@ interface MediaDao {
         """,
     )
     fun pagingSourceAll(includeMissing: Boolean): PagingSource<Int, MediaEntity>
+
+    /**
+     * The grid under an arbitrary [com.galleryorganizer.domain.search.SearchQuery].
+     *
+     * `@RawQuery` because the filter shape is genuinely dynamic — tag AND/OR/NOT, date
+     * range, folder, media type and full-text in any combination — and writing one
+     * `@Query` per combination is not possible. `observedEntities` is what keeps the
+     * paged results live: tag an item and the filtered grid updates itself.
+     */
+    @RawQuery(
+        observedEntities = [MediaEntity::class, MediaTagCrossRef::class, TagEntity::class],
+    )
+    fun pagingSourceRaw(query: SupportSQLiteQuery): PagingSource<Int, MediaEntity>
+
+    @RawQuery(
+        observedEntities = [MediaEntity::class, MediaTagCrossRef::class, TagEntity::class],
+    )
+    fun observeCountRaw(query: SupportSQLiteQuery): Flow<Int>
+
+    @RawQuery
+    suspend fun idsForRaw(query: SupportSQLiteQuery): List<Long>
 
     /** Ids in grid order, for "select all" over a bounded result. */
     @Query(

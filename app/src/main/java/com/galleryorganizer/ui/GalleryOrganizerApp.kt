@@ -1,7 +1,9 @@
 package com.galleryorganizer.ui
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Sell
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.SnackbarHostState
@@ -28,6 +30,9 @@ import com.galleryorganizer.ui.permissions.MediaPermissionScreen
 import com.galleryorganizer.ui.permissions.PartialAccessBanner
 import com.galleryorganizer.ui.permissions.rememberMediaPermissionController
 import com.galleryorganizer.ui.permissions.rememberMediaPermissionState
+import com.galleryorganizer.ui.search.FilterSheet
+import com.galleryorganizer.ui.search.GallerySearchBar
+import com.galleryorganizer.ui.search.SavedSearchRow
 import com.galleryorganizer.ui.tags.BulkTagSheet
 import com.galleryorganizer.ui.tags.TagManagerScreen
 import com.galleryorganizer.ui.tags.TagViewModel
@@ -92,6 +97,11 @@ fun GalleryOrganizerApp() {
             val lastAction by tagViewModel.lastAction.collectAsStateWithLifecycle()
             val snackbarHostState = remember { SnackbarHostState() }
             var sheetOpen by remember { mutableStateOf(false) }
+            var filtersOpen by remember { mutableStateOf(false) }
+            val query by galleryViewModel.query.collectAsStateWithLifecycle()
+            val saved by galleryViewModel.savedSearches.collectAsStateWithLifecycle()
+            val activeSaved by galleryViewModel.activeSavedSearch.collectAsStateWithLifecycle()
+            val buckets by galleryViewModel.buckets.collectAsStateWithLifecycle()
 
             LaunchedEffect(lastAction) {
                 val action = lastAction ?: return@LaunchedEffect
@@ -129,17 +139,55 @@ fun GalleryOrganizerApp() {
                         )
                     }
                 },
+                searchBar = {
+                    Column {
+                        GallerySearchBar(
+                            query = query,
+                            onTextChange = galleryViewModel::setText,
+                            onOpenFilters = { filtersOpen = true },
+                        )
+                        SavedSearchRow(
+                            saved = saved,
+                            activeId = activeSaved?.id,
+                            canSave = !query.isEmpty && activeSaved == null,
+                            onOpen = galleryViewModel::openSavedSearch,
+                            onSave = galleryViewModel::saveCurrentSearch,
+                            onTogglePin = {
+                                galleryViewModel.setSavedSearchPinned(it.id, !it.pinned)
+                            },
+                            onDelete = { galleryViewModel.deleteSavedSearch(it.id) },
+                        )
+                    }
+                },
                 selectionActions = {
                     IconButton(onClick = { sheetOpen = true }) {
                         Icon(Icons.Filled.Sell, contentDescription = "Tag selected items")
                     }
                 },
                 topBarActions = {
+                    if (!query.isEmpty) {
+                        IconButton(onClick = galleryViewModel::selectAllResults) {
+                            Icon(
+                                Icons.Filled.SelectAll,
+                                contentDescription = "Select all results",
+                            )
+                        }
+                    }
                     IconButton(onClick = { navController.navigate(Routes.TAGS) }) {
                         Icon(Icons.Filled.Sell, contentDescription = "Manage tags")
                     }
                 },
             )
+
+            if (filtersOpen) {
+                FilterSheet(
+                    query = query,
+                    buckets = buckets,
+                    tagViewModel = tagViewModel,
+                    onApply = galleryViewModel::setQuery,
+                    onDismiss = { filtersOpen = false },
+                )
+            }
 
             if (sheetOpen && selection.active) {
                 BulkTagSheet(

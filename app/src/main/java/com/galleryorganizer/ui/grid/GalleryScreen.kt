@@ -43,6 +43,7 @@ fun GalleryScreen(
     indexing: com.galleryorganizer.work.IndexingStatus,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     banner: @Composable () -> Unit = {},
+    searchBar: @Composable () -> Unit = {},
     onOpen: (MediaEntity) -> Unit = {},
     selectionActions: @Composable (Set<Long>) -> Unit = {},
     topBarActions: @Composable () -> Unit = {},
@@ -50,6 +51,8 @@ fun GalleryScreen(
     val entries = viewModel.entries.collectAsLazyPagingItems()
     val selection by viewModel.selection.collectAsStateWithLifecycle()
     val total by viewModel.itemCount.collectAsStateWithLifecycle()
+    val query by viewModel.query.collectAsStateWithLifecycle()
+    val filtered = !query.isEmpty
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -71,7 +74,7 @@ fun GalleryScreen(
                 TopAppBar(
                     title = {
                         Column {
-                            Text("Gallery")
+                            Text(if (filtered) "Results" else "Gallery")
                             if (total > 0) {
                                 Text(
                                     "%,d items".format(total),
@@ -88,6 +91,7 @@ fun GalleryScreen(
     ) { padding ->
         Column(Modifier.padding(padding)) {
             banner()
+            searchBar()
             if (indexing.queued) {
                 IndexingStrip(indexing.scanned)
             }
@@ -96,7 +100,10 @@ fun GalleryScreen(
                     entries.loadState.refresh is LoadState.Loading && entries.itemCount == 0 ->
                         CircularProgressIndicator(Modifier.align(Alignment.Center))
 
-                    entries.itemCount == 0 -> EmptyGrid(indexing.queued)
+                    entries.itemCount == 0 -> EmptyGrid(
+                        indexing = indexing.queued,
+                        filtered = filtered,
+                    )
 
                     else -> GalleryGrid(
                         entries = entries,
@@ -127,7 +134,7 @@ private fun IndexingStrip(scanned: Int) {
 }
 
 @Composable
-private fun EmptyGrid(indexing: Boolean) {
+private fun EmptyGrid(indexing: Boolean, filtered: Boolean) {
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center,
@@ -141,15 +148,20 @@ private fun EmptyGrid(indexing: Boolean) {
         )
         Spacer(Modifier.height(16.dp))
         Text(
-            if (indexing) "Finding your photos…" else "No photos or videos yet",
+            when {
+                indexing -> "Finding your photos…"
+                filtered -> "Nothing matches those filters"
+                else -> "No photos or videos yet"
+            },
             style = MaterialTheme.typography.titleMedium,
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            if (indexing) {
-                "This takes a few minutes the first time. You can leave the app; it carries on."
-            } else {
-                "Anything in your gallery will show up here once it has been indexed."
+            when {
+                indexing ->
+                    "This takes a few minutes the first time. You can leave the app; it carries on."
+                filtered -> "Try removing a filter, or search for something else."
+                else -> "Anything in your gallery will show up here once it has been indexed."
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
