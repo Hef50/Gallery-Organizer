@@ -11,7 +11,7 @@ import coil.fetch.FetchResult
 import coil.fetch.Fetcher
 import coil.fetch.SourceResult
 import coil.request.Options
-import coil.size.pxOrElse
+import coil.size.Dimension
 import okio.Buffer
 import okio.buffer
 import okio.source
@@ -29,14 +29,38 @@ import kotlin.math.max
  * and has to decode the original, so an uncapped request from the one-column grid means
  * decoding a 200 MP JPEG for every visible tile.
  */
-internal val ThumbnailBuckets = intArrayOf(192, 384, 768, 1024)
+internal val ThumbnailBuckets = intArrayOf(384, 768, 1024)
 
 internal const val DEFAULT_THUMBNAIL_PX = 384
 
-/** The size a request of [requestedPx] is actually served at. Pure, so it is testable. */
+/**
+ * The size a request of [requestedPx] is actually served at. Pure, so it is testable.
+ *
+ * There is deliberately no bucket below [DEFAULT_THUMBNAIL_PX], and that is a scrolling
+ * decision rather than a quality one. Every dense zoom level — four, six and ten columns —
+ * lands on the same bucket, so pinching between them reuses one cached thumbnail per photo
+ * instead of re-fetching the entire visible grid at a new size. Coil still downsamples to
+ * the cell when it decodes, so the ten-column grid holds ten-column-sized bitmaps in memory;
+ * only the file on disk is shared.
+ */
 internal fun thumbnailBucketFor(requestedPx: Int): Int = when {
     requestedPx <= 0 -> DEFAULT_THUMBNAIL_PX
     else -> ThumbnailBuckets.firstOrNull { it >= requestedPx } ?: ThumbnailBuckets.last()
+}
+
+/**
+ * The largest dimension a request is bounded by, or null when it is not bounded at all.
+ *
+ * Null means `Size.ORIGINAL`, which is the full-screen viewer asking for the real photograph,
+ * and it has to be distinguishable from a request for zero pixels. Reading an undefined
+ * dimension as `0` — which is what `pxOrElse { 0 }` does — silently turned the viewer into a
+ * request for the smallest bucket, so opening a photo full screen showed a 384-pixel
+ * thumbnail blown up to fill the screen and pinching into it revealed nothing. That is the
+ * whole reason this returns `Int?` rather than `Int`.
+ */
+internal fun boundedSizeOf(widthPx: Int?, heightPx: Int?): Int? {
+    if (widthPx == null && heightPx == null) return null
+    return max(widthPx ?: 0, heightPx ?: 0).takeIf { it > 0 }
 }
 
 /** The disk-cache key for a photo at a bucket. Pure, so it is testable. */
@@ -70,9 +94,17 @@ class MediaStoreThumbnailFetcher(
 ) : Fetcher {
 
     override suspend fun fetch(): FetchResult {
-        val bucket = thumbnailBucketFor(
-            max(options.size.width.pxOrElse { 0 }, options.size.height.pxOrElse { 0 }),
+        val requested = boundedSizeOf(
+            widthPx = (options.size.width as? Dimension.Pixels)?.px,
+            heightPx = (options.size.height as? Dimension.Pixels)?.px,
         )
+
+        // Unbounded — the full-screen viewer wants the photograph itself. Hand over the
+        // original and let Coil subsample it to the screen; a thumbnail here is something
+        // the user can see through, and can pinch into and find nothing behind.
+        if (requested == null) return streamOriginal()
+
+        val bucket = thumbnailBucketFor(requested)
         val key = thumbnailCacheKey(data, bucket)
 
         // Fast path: this exact thumbnail has been generated before, by any earlier run.
@@ -98,8 +130,18 @@ class MediaStoreThumbnailFetcher(
             )
         }
 
-        // No thumbnail at all — a file the media scanner has not reached yet. Stream the
-        // original so Coil can subsample it. It never decodes at full size.
+        // No thumbnail at all — a file the media scanner has not reached yet.
+        return streamOriginal()
+    }
+
+    /**
+     * The original bytes, for Coil to decode and subsample itself.
+     *
+     * Not written to the disk cache: these are whole photographs, and a handful of 50 MB
+     * originals would evict every thumbnail in the cache to hold images the viewer will ask
+     * for again at a different zoom anyway.
+     */
+    private fun streamOriginal(): SourceResult {
         val stream = options.context.contentResolver.openInputStream(data)
             ?: throw IOException("Unable to open $data")
         return SourceResult(

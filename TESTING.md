@@ -109,6 +109,16 @@ seen is still slow, that cache is not working and is worth reporting.
 Also try it at one column (pinch all the way in). That used to decode a full 200 MP original
 per tile.
 
+### Pinch all the way out
+Ten columns puts a couple of hundred tiles on screen. It should fling smoothly, with tiles
+filling in against black as they load rather than the whole grid stalling. Pinching between
+four, six and ten columns should be instant the second time — every dense level shares one
+cached thumbnail per photo, so zooming does not re-fetch the screen.
+
+### Full-screen photos are the real photograph
+Open a photo and pinch into it. You should see genuine detail — this used to be a 384-pixel
+thumbnail stretched across the screen, so there was nothing to zoom into.
+
 ### The date slider
 Start scrolling and a slim thumb appears down the right edge, with year labels beside it.
 Drag it: a bubble shows the month and how many photos are in it, you get a small haptic tick
@@ -238,7 +248,7 @@ only the app's own database.
 ## 6. Running the tests
 
 ```bash
-./gradlew testDebugUnitTest   # 294 tests, JVM only, no device needed
+./gradlew testDebugUnitTest   # 297 tests, JVM only, no device needed
 ./gradlew lintDebug           # must be clean
 ```
 

@@ -806,3 +806,53 @@ every piece in isolation says nothing about whether the pieces compose, and this
 assembled from paged lists whose contents arrive *after* the first frame. The empty first
 frame is a real state that every screen passes through on every launch, and it is exactly the
 state that unit tests of the parts never visit.
+
+---
+
+## Three bugs from the first real device session
+
+### The viewer was showing a thumbnail, not the photograph
+Opening a photo full screen and pinching into it revealed nothing, because the viewer was
+never getting the photograph. It asks for `Size.ORIGINAL`, which has *no pixel dimensions* —
+and the fetcher read those dimensions with `pxOrElse { 0 }`, got zero, and treated zero as a
+request for the smallest bucket. So a 200 MP photograph was served as a 384-pixel thumbnail
+stretched across a 1440-pixel screen, and cached at that size so it never improved.
+
+The lesson is in the type. `boundedSizeOf` returns `Int?`, where null means "unbounded, give
+them the original", precisely so that "no size specified" cannot silently collapse into "the
+smallest size available". A default of zero looked harmless and was not.
+
+Originals are deliberately *not* written to the disk cache: a handful of 50 MB photographs
+would evict every thumbnail in it.
+
+### The zoomed-out grid was paying for chrome nobody could see
+At ten columns there are a couple of hundred tiles on screen. Each one was allocating four
+running animations and — much worse — a `graphicsLayer` clipping to a freshly built
+`RoundedCornerShape`, which is a separate clipped render node per tile. Affordable for the
+forty tiles of a four-column grid; not remotely affordable for a ten-column one.
+
+`PlainMediaCell` is the path taken when there is no selection anywhere and nothing is dimmed,
+which is almost always. It clips once on the container, runs no animations, and is otherwise
+an image in a rounded box. Switching between it and the full cell costs one frame when a
+selection begins, which is a deliberate gesture rather than a fling.
+
+Unloaded tiles are now near-black rather than mid grey, so a half-filled zoomed-out grid
+reads as absence rather than as a wall of placeholders — the same thing Samsung Gallery does.
+
+### The smallest thumbnail bucket was making zoom worse
+Four, six and ten columns used to resolve to different buckets, so pinching out re-fetched
+every visible tile at a new size — the moment the grid felt worst. Dropping the bucket below
+384 makes every dense level share one cached file per photo. Nothing is lost: Coil still
+downsamples to the cell when it decodes, so a ten-column grid holds ten-column bitmaps in
+memory; only the file on disk is shared.
+
+### The filter sheet could not be applied
+The sheet's content column had no scroll, and it is far taller than a phone: media type,
+sort, dates, up to twenty-four folder chips, two switches and a tag list — around 990 dp of
+content on a screen with roughly 780 dp to give it. "Show results" sat below the bottom of
+the display with no way to reach it, so a filter could be chosen and never committed. From
+the outside that is indistinguishable from filters that do nothing.
+
+The content now scrolls and the action row is pinned outside it, so it is reachable however
+tall the filters get. The button also reads "Done" rather than "Show results" when nothing
+has been changed, so it stops promising an action it is not going to take.

@@ -63,6 +63,14 @@ fun MediaCell(
     corner: androidx.compose.ui.unit.Dp = 8.dp,
     dimmed: Boolean = false,
 ) {
+    // The overwhelmingly common case — no selection anywhere on screen — draws the plainest
+    // thing that works, because at ten columns there are a couple of hundred of these on
+    // screen at once and everything below is paid for by every one of them.
+    if (!selectionActive && !dimmed) {
+        PlainMediaCell(media, modifier, corner)
+        return
+    }
+
     val context = LocalContext.current
     val scale by animateFloatAsState(if (selected) 0.82f else 1f, Motion.spatial(), label = "cellScale")
     val radius by animateDpAsState(if (selected) corner + 6.dp else corner, Motion.spatial(), label = "cellRadius")
@@ -123,6 +131,54 @@ fun MediaCell(
             modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
         ) {
             SelectionTick(selected)
+        }
+    }
+}
+
+/**
+ * A photo with nothing else going on: no selection anywhere, nothing dimmed.
+ *
+ * This exists purely for the zoomed-out grid. The full cell above allocates four running
+ * animations and, worse, a `graphicsLayer` that clips to a freshly built `RoundedCornerShape`
+ * — which is a separate clipped render node per tile. That is affordable for the forty tiles
+ * of a four-column grid and not at all affordable for the couple of hundred of a ten-column
+ * one, where it was the difference between a smooth fling and a slideshow.
+ *
+ * Here the clip happens once on the container, there are no animations, and the tile is
+ * essentially an image in a rounded box. Switching between this and the full cell costs one
+ * frame when a selection starts, which is a gesture, not a fling.
+ */
+@Composable
+private fun PlainMediaCell(
+    media: MediaEntity,
+    modifier: Modifier,
+    corner: androidx.compose.ui.unit.Dp,
+) {
+    val context = LocalContext.current
+    Box(
+        modifier
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(corner))
+            // Near-black rather than a mid grey, so an unloaded tile reads as absence
+            // instead of as a placeholder — the same thing Samsung Gallery does, and what
+            // makes a half-loaded zoomed-out grid look intentional.
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+            .semantics { contentDescription = media.displayName },
+    ) {
+        AsyncImage(
+            model = remember(media.uri) {
+                ImageRequest.Builder(context).data(media.uri).crossfade(false).build()
+            },
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        if (media.isVideo) {
+            VideoAffordance(
+                duration = media.duration,
+                compact = corner < 6.dp,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
