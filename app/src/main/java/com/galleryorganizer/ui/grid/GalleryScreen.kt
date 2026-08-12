@@ -37,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -83,14 +84,19 @@ fun GalleryScreen(
      * query, and after a jump it is not even close. Every photo carries a date, so this
      * stays correct however the window was assembled.
      */
+    var lastScrubPosition by remember { mutableFloatStateOf(0f) }
     val scrubPosition by remember(scrubber) {
         derivedStateOf {
-            val top = gridState.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: 0
-            val entry = generateSequence(top) { it + 1 }
-                .take(LOOKAHEAD_FOR_DATE)
-                .mapNotNull { entries.peek(it) as? GridEntry.Item }
-                .firstOrNull()
-            entry?.let { scrubber.fractionForDate(it.media.dateTaken) } ?: 0f
+            val date = firstItemDateNear(
+                topIndex = gridState.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: 0,
+                itemCount = entries.itemCount,
+                lookahead = LOOKAHEAD_FOR_DATE,
+                peek = entries::peek,
+            )
+            // Nothing loaded yet, so keep the thumb where it was instead of snapping it to
+            // the top — the list is briefly empty on every refresh, not just at launch.
+            date?.let { scrubber.fractionForDate(it) }?.also { lastScrubPosition = it }
+                ?: lastScrubPosition
         }
     }
 
