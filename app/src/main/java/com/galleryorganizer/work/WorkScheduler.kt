@@ -21,6 +21,7 @@ object WorkScheduler {
     const val INDEX_PERIODIC_WORK = "media-index-periodic"
     const val HASH_BACKFILL_WORK = "hash-backfill"
     const val AUTO_TAG_WORK = "auto-tag"
+    const val LOCATION_WORK = "location-backfill"
 
     /**
      * Catch-up pass, run on launch and after a permission change.
@@ -106,6 +107,31 @@ object WorkScheduler {
     fun cancelAutoTag(context: Context) {
         WorkManager.getInstance(context).cancelUniqueWork(AUTO_TAG_WORK)
     }
+
+    /**
+     * Reading EXIF coordinates. Battery-not-low but not charging-only: unlike ML analysis
+     * this is cheap per file, and the Places screen is useless until it has run.
+     *
+     * Always delayed. This opens *every file in the library* to read a header, which is the
+     * same class of work the brief forbids doing eagerly for hashing — so it deliberately
+     * starts behind the first index pass rather than fighting it for I/O on the one launch
+     * where the user is watching photos appear. [LOCATION_FIRST_DELAY] on the initial
+     * enqueue, [LOCATION_STEP_DELAY] between the runs it queues for itself.
+     */
+    fun enqueueLocationBackfill(context: Context, delay: Duration = LOCATION_FIRST_DELAY) {
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            LOCATION_WORK,
+            ExistingWorkPolicy.KEEP,
+            OneTimeWorkRequestBuilder<LocationBackfillWorker>()
+                .setInitialDelay(delay)
+                .setConstraints(Constraints.Builder().setRequiresBatteryNotLow(true).build())
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, Duration.ofMinutes(5))
+                .build(),
+        )
+    }
+
+    val LOCATION_FIRST_DELAY: Duration = Duration.ofMinutes(3)
+    val LOCATION_STEP_DELAY: Duration = Duration.ofMinutes(1)
 
     /** True while an indexing pass is queued or running, for the UI's progress strip. */
     fun observeIndexing(context: Context): Flow<IndexingStatus> =

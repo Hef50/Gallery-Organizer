@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
+import androidx.paging.PagingSource
 import androidx.paging.cachedIn
 import androidx.sqlite.db.SimpleSQLiteQuery
 import com.galleryorganizer.data.db.entity.MediaEntity
@@ -165,7 +166,7 @@ class GalleryViewModel(
     val viewerEntries: Flow<PagingData<MediaEntity>> = _viewer
         .filterNotNull()
         .flatMapLatest { request ->
-            val statement = search.statementFor(_query.value.copy(excludedBucketIds = hiddenBuckets))
+            val factory = pagingSourceFactoryFor(request.source)
             Pager(
                 config = PagingConfig(
                     pageSize = VIEWER_PAGE_SIZE,
@@ -174,14 +175,43 @@ class GalleryViewModel(
                     enablePlaceholders = false,
                 ),
                 initialKey = request.mediaIndex,
-                pagingSourceFactory = {
-                    container.database.mediaDao().pagingSourceRaw(
-                        SimpleSQLiteQuery(statement.sql, statement.args.toTypedArray()),
-                    )
-                },
+                pagingSourceFactory = factory,
             ).flow
         }
         .cachedIn(viewModelScope)
+
+    /**
+     * Swiping in the viewer has to stay inside whatever the user was looking at.
+     *
+     * Opening a photo from an album and then swiping into the rest of the library would be
+     * a small betrayal of the album: the point of one is that it is a bounded, ordered set.
+     * So the viewer pages over the *same* source the screen behind it did.
+     *
+     * Suspending, and returning a *factory*, because building the library's statement reads
+     * the tag hierarchy — Paging calls the factory again on every invalidation and cannot
+     * suspend when it does, so the query is resolved once, here.
+     */
+    private suspend fun pagingSourceFactoryFor(
+        source: ViewerSource,
+    ): () -> PagingSource<Int, MediaEntity> = when (source) {
+        is ViewerSource.Library -> {
+            val statement =
+                search.statementFor(_query.value.copy(excludedBucketIds = hiddenBuckets));
+            {
+                container.database.mediaDao().pagingSourceRaw(
+                    SimpleSQLiteQuery(statement.sql, statement.args.toTypedArray()),
+                )
+            }
+        }
+
+        is ViewerSource.Album -> {
+            { container.database.albumDao().pagingSourceFor(source.albumId) }
+        }
+
+        is ViewerSource.Ids -> {
+            { container.database.mediaDao().pagingSourceForIds(source.ids) }
+        }
+    }
 
     private var hiddenBuckets: List<Long> = emptyList()
 
@@ -190,7 +220,17 @@ class GalleryViewModel(
      *   date headers before it. The viewer's pager has no headers, so this is the page.
      */
     fun openViewer(mediaId: Long, mediaIndex: Int) {
-        _viewer.value = ViewerRequest(mediaId, mediaIndex)
+        _viewer.value = ViewerRequest(mediaId, mediaIndex, ViewerSource.Library)
+    }
+
+    fun openAlbumViewer(albumId: Long, mediaId: Long, mediaIndex: Int) {
+        _viewer.value = ViewerRequest(mediaId, mediaIndex, ViewerSource.Album(albumId))
+    }
+
+    /** For a set the user is looking at that has no query behind it — a map cluster. */
+    fun openIdsViewer(ids: List<Long>, mediaId: Long) {
+        val index = ids.indexOf(mediaId).coerceAtLeast(0)
+        _viewer.value = ViewerRequest(mediaId, index, ViewerSource.Ids(ids))
     }
 
     fun closeViewer() {
@@ -252,5 +292,24 @@ class GalleryViewModel(
     }
 }
 
-/** Which photo the viewer opened on, and where it sits in the current result. */
-data class ViewerRequest(val mediaId: Long, val mediaIndex: Int)
+/** Which photo the viewer opened on, and where it sits in [source]. */
+data class ViewerRequest(
+    val mediaId: Long,
+    val mediaIndex: Int,
+    val source: ViewerSource = ViewerSource.Library,
+)
+
+/** What the viewer swipes through. */
+sealed interface ViewerSource {
+    /** The library under the current search and filters — the ordinary case. */
+    data object Library : ViewerSource
+
+    /** One album, in the user's own order. */
+    data class Album(val albumId: Long) : ViewerSource
+
+    /**
+     * An explicit, bounded set — a map cluster. Bounded on purpose: this goes into an
+     * `IN (...)` clause, so the caller must keep it well under SQLite's variable ceiling.
+     */
+    data class Ids(val ids: List<Long>) : ViewerSource
+}

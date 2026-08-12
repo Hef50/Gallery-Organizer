@@ -24,13 +24,22 @@ It is built for a 150,000+ item library on a Samsung Galaxy S25 Ultra.
   phone; items are matched by content, so tags find their photos again even after a move.
 - **Suggestions** — on-device labelling and OCR while the phone is charging. Nothing is
   applied until you accept it.
+- **Albums** — ordered, hand-made collections with a cover, kept separate from tags on
+  purpose: a tag describes a photo, an album arranges a set of them.
+- **Places** — an offline map built from the coordinates already in your photos. Tap a
+  cluster and name it once; that makes a Place tag and applies it to everything taken
+  there, so from then on it is searchable like any other tag. No tiles are downloaded and
+  no coordinate leaves the phone.
+- **Typed tags** — People, Places, Events, Things. A flat list stops being usable at about
+  two hundred tags; the picker groups by kind so the tag you want is one tap away.
 - **Housekeeping** — duplicate finder, per-folder hiding, "recently added", and an
   opt-in export of tags into the photo files themselves.
 
 ## Principles
 
 - **Fully offline.** The app has no `INTERNET` permission at all. Nothing is uploaded,
-  nothing is fetched, there is no account.
+  nothing is fetched, there is no account. That is why the map has no basemap and why
+  naming a place is something you do rather than something a server tells you.
 - **Zero cost.** No cloud backend, no hosted inference, no paid dependencies.
 - **Your files are never touched.** The app never deletes or overwrites media. The one
   feature that writes to files at all (XMP tag write-back) is opt-in, writes to a temp

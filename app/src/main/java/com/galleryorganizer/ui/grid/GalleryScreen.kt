@@ -32,8 +32,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -56,11 +54,11 @@ fun GalleryScreen(
     indexing: IndexingStatus,
     sharedScope: SharedTransitionScope,
     animatedScope: AnimatedVisibilityScope,
-    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     banner: @Composable () -> Unit = {},
     header: @Composable () -> Unit = {},
     onOpen: (MediaEntity, Int) -> Unit = { _, _ -> },
     selectionActions: @Composable (Set<Long>) -> Unit = {},
+    contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
     val entries = viewModel.entries.collectAsLazyPagingItems()
     val selection by viewModel.selection.collectAsStateWithLifecycle()
@@ -71,9 +69,10 @@ fun GalleryScreen(
     val gridState = rememberLazyGridState()
     val zoomState = rememberGridZoomState()
 
+    // No snackbar host here: the shell owns the one snackbar, so an undo raised from an
+    // album or the map lands in the same place as one raised from the grid.
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0),
     ) { padding ->
         Box(Modifier.fillMaxSize()) {
@@ -106,7 +105,8 @@ fun GalleryScreen(
                             contentPadding = PaddingValues(
                                 start = 2.dp,
                                 end = 2.dp,
-                                bottom = padding.calculateBottomPadding() + 96.dp,
+                                bottom = padding.calculateBottomPadding() +
+                                    contentPadding.calculateBottomPadding() + 24.dp,
                             ),
                         )
                     }

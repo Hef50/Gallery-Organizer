@@ -2,6 +2,7 @@ package com.galleryorganizer.domain.model
 
 import com.galleryorganizer.data.db.dao.TagWithCount
 import com.galleryorganizer.data.db.entity.TagEntity
+import com.galleryorganizer.data.db.entity.TagKind
 
 /** A tag plus its place in the hierarchy, ready to render. */
 data class TagNode(
@@ -9,6 +10,7 @@ data class TagNode(
     val name: String,
     val parentId: Long,
     val color: Int?,
+    val kind: TagKind = TagKind.Note,
     /** Items carrying this exact tag. */
     val ownCount: Int,
     /** Items carrying this tag or anything under it — what the user actually expects. */
@@ -66,6 +68,7 @@ fun buildTagTree(tags: List<TagWithCount>): List<TagNode> {
             name = tag.name,
             parentId = tag.parentId,
             color = tag.color,
+            kind = tag.kind,
             ownCount = tag.itemCount,
             subtreeCount = tag.itemCount + children.sumOf { it.subtreeCount },
             depth = depth,
@@ -88,6 +91,19 @@ fun buildTagTree(tags: List<TagWithCount>): List<TagNode> {
 
     return forest.sortedBy { it.name.lowercase() }
 }
+
+/**
+ * Roots split into the picker's sections, in [TagKind] declaration order, with empty
+ * sections dropped.
+ *
+ * Only roots are grouped: a child inherits its section from the branch it is in, so
+ * `People / Anna / 2019` stays under People even if someone re-kinds the leaf by hand.
+ */
+fun List<TagNode>.groupedByKind(): List<Pair<TagKind, List<TagNode>>> =
+    TagKind.entries.mapNotNull { kind ->
+        val section = filter { it.kind == kind }
+        if (section.isEmpty()) null else kind to section
+    }
 
 /** Depth-first flattening, skipping the children of anything collapsed. */
 fun List<TagNode>.flattenVisible(expanded: Set<Long>): List<TagNode> {

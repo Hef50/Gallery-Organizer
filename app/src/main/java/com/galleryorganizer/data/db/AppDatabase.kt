@@ -7,6 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.galleryorganizer.data.db.dao.AlbumDao
 import com.galleryorganizer.data.db.dao.IndexStateDao
 import com.galleryorganizer.data.db.dao.MediaDao
 import com.galleryorganizer.data.db.dao.MediaFtsDao
@@ -15,6 +16,8 @@ import com.galleryorganizer.data.db.dao.SavedSearchDao
 import com.galleryorganizer.data.db.dao.SuggestionDao
 import com.galleryorganizer.data.db.dao.TagDao
 import com.galleryorganizer.data.db.entity.IndexStateEntity
+import com.galleryorganizer.data.db.entity.AlbumEntity
+import com.galleryorganizer.data.db.entity.AlbumMediaCrossRef
 import com.galleryorganizer.data.db.entity.LabelSuggestionEntity
 import com.galleryorganizer.data.db.entity.MediaEntity
 import com.galleryorganizer.data.db.entity.MediaFtsEntity
@@ -22,6 +25,7 @@ import com.galleryorganizer.data.db.entity.MediaTagCrossRef
 import com.galleryorganizer.data.db.entity.SavedSearchEntity
 import com.galleryorganizer.data.db.entity.TagEntity
 import com.galleryorganizer.data.db.entity.SuggestionStatus
+import com.galleryorganizer.data.db.entity.TagKind
 import com.galleryorganizer.data.db.entity.TagSource
 
 class Converters {
@@ -36,6 +40,12 @@ class Converters {
 
     @TypeConverter
     fun wireToSuggestionStatus(wire: String): SuggestionStatus = SuggestionStatus.fromWire(wire)
+
+    @TypeConverter
+    fun tagKindToWire(kind: TagKind): String = kind.wire
+
+    @TypeConverter
+    fun wireToTagKind(wire: String): TagKind = TagKind.fromWire(wire)
 }
 
 @Database(
@@ -47,6 +57,8 @@ class Converters {
         IndexStateEntity::class,
         MediaFtsEntity::class,
         LabelSuggestionEntity::class,
+        AlbumEntity::class,
+        AlbumMediaCrossRef::class,
     ],
     version = AppDatabase.VERSION,
     exportSchema = true,
@@ -61,9 +73,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun indexStateDao(): IndexStateDao
     abstract fun savedSearchDao(): SavedSearchDao
     abstract fun suggestionDao(): SuggestionDao
+    abstract fun albumDao(): AlbumDao
 
     companion object {
-        const val VERSION = 4
+        const val VERSION = 5
         const val NAME = "gallery-organizer.db"
 
         fun build(context: Context): AppDatabase =

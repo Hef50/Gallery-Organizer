@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.galleryorganizer.data.db.entity.TagEntity
+import com.galleryorganizer.data.db.entity.TagKind
 import com.galleryorganizer.data.repo.TagCheckState
 import com.galleryorganizer.di.AppContainer
 import com.galleryorganizer.domain.model.TagNode
@@ -69,6 +70,9 @@ class TagViewModel(private val container: AppContainer) : ViewModel() {
     fun applyTag(mediaIds: Set<Long>, tagId: Long, tagName: String) =
         applyInternal(mediaIds, tagId, tagName, apply = true)
 
+    fun removeTag(mediaIds: Set<Long>, tagId: Long, tagName: String) =
+        applyInternal(mediaIds, tagId, tagName, apply = false)
+
     private fun applyInternal(mediaIds: Set<Long>, tagId: Long, tagName: String, apply: Boolean) {
         if (mediaIds.isEmpty()) return
         viewModelScope.launch {
@@ -104,16 +108,25 @@ class TagViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     /** Create-and-apply from the sheet's text field, still a single gesture. */
-    fun createAndApply(mediaIds: Set<Long>, name: String, parentId: Long) {
+    fun createAndApply(
+        mediaIds: Set<Long>,
+        name: String,
+        parentId: Long,
+        kind: TagKind? = null,
+    ) {
         viewModelScope.launch {
-            val id = tags.ensureTag(name, parentId)
+            val id = tags.ensureTag(name, parentId, kind)
             _expanded.value = _expanded.value + parentId
             applyInternal(mediaIds, id, name.trim(), apply = true)
         }
     }
 
-    fun createTag(name: String, parentId: Long) {
-        viewModelScope.launch { tags.ensureTag(name, parentId) }
+    fun createTag(name: String, parentId: Long, kind: TagKind? = null) {
+        viewModelScope.launch { tags.ensureTag(name, parentId, kind) }
+    }
+
+    fun setKind(tagId: Long, kind: TagKind) {
+        viewModelScope.launch { tags.setKind(tagId, kind) }
     }
 
     fun rename(tagId: Long, name: String) {

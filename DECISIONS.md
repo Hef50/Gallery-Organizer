@@ -544,3 +544,120 @@ walks the range already in date order and `LIMIT` stops early, plus
 `(bucket_id, date_taken)` for the folder-filtered grid. The lesson generalises: a
 single-column index on a boolean is rarely useful as a filter and is very good at
 misleading the planner away from the index that carries the ordering.
+
+---
+
+## Organisation — albums, places and typed tags (schema v5)
+
+### An album is not a tag, and a saved search is neither
+Three things in this app group photos, and folding any two together would lose something.
+
+A **tag** is a fact about a photo — "this is Kyoto" — and belongs to every photo that fits
+it. An **album** is a curated sequence someone assembled on purpose: it has an order, a
+cover, and membership that is nobody's business but the user's. A **saved search** is a
+standing question that answers itself as the library grows.
+
+The tempting simplification is to make albums a kind of tag. It fails on ordering: the
+twelve shots from a trip are in the order you want them seen, and `media_tag` has nowhere to
+put that. The opposite simplification — making tags a kind of album — fails on the fact that
+tags nest and describe, and nobody wants to hand-maintain membership of "Anna".
+
+So `album` and `album_media` are their own tables, with an explicit `position`.
+
+### Album positions are sparse
+`album_media.position` moves in steps of 1,000, so dragging a photo between two others
+rewrites exactly one row — the midpoint of the gap. When a gap is used up (about ten moves
+into the same slot) the album is renumbered in one transaction and the move retried.
+Renumbering every drag would be the thing that makes reordering feel slow; renumbering
+occasionally is invisible.
+
+### `cover_media_id` is deliberately not a foreign key
+An album should keep pointing at its chosen cover even while that photo is temporarily
+missing, and a cascade would silently clear it. The shelf resolves the cover in SQL and
+falls back to the album's first present member, so a missing cover shows a picture rather
+than a grey box.
+
+### Tags have a kind, and it is a string on the wire
+`TagKind` — Person, Place, Event, Thing, Other — exists because a flat list stops being
+navigable at about two hundred tags: "Anna", "Antwerp" and "Anniversary" are three
+completely different things sitting next to each other alphabetically. A kind gives each tag
+an icon, a colour and a section, so the picker can be organised the way people think.
+
+It is written into the backup as an explicit string (`"person"`) rather than an enum
+ordinal, so that reordering the enum can never silently turn everyone's People into Places.
+Restoring a v1-era file — where every tag record implicitly says `"note"` — never re-kinds a
+tag that already exists on the device, because that would undo work the user did here.
+
+A new child tag inherits its parent's kind: someone adding "Kyoto" under "Japan" means
+another place, and asking them to say so again is friction for no information.
+
+### Location is read in a separate, delayed pass
+MediaStore **redacts GPS from the copy it hands an app**. Reading EXIF from the ordinary
+content URI returns nothing at all, no matter what the file contains: the original is only
+available via `MediaStore.setRequireOriginal` and only with `ACCESS_MEDIA_LOCATION`.
+
+That makes location a second full read of every file — the indexer gets everything else from
+MediaStore's index without opening anything — which is exactly the kind of eager whole-library
+work the brief rules out. So it is its own worker, it starts three minutes behind launch so
+it never fights the first index pass for I/O, and it records "no GPS tag" as *read* rather
+than leaving it pending, or it would re-open the same tens of thousands of screenshots
+forever.
+
+`ACCESS_MEDIA_LOCATION` is requested in the same dialog as the read permissions. The system
+will not grant it without a media read grant anyway, and a separate prompt about location
+days later is the kind of thing that makes people say no. Refusing it costs the Places
+screen and nothing else — it is deliberately absent from `MediaPermissionState.access`.
+
+### The map has no basemap, on purpose
+Map tiles come from a tile server, a tile server is the network, and there is no `INTERNET`
+permission for the whole of v1. Bundling an offline basemap would mean either a vector
+planet (hundreds of megabytes) or a coastline outline coarse enough to be decorative.
+
+So `PlaceMap` draws what it actually knows: every located photo as a faint point, clusters as
+weighted discs, a graticule labelled with real coordinates, and a scale bar. It reads as a
+plot of the user's own travel rather than a world map, which is the honest thing for it to
+be — and for what the screen is *for*, a basemap would not add anything the clusters do not
+already say.
+
+### Naming a place is the feature; the map is how you find it
+Without a network there is no gazetteer, so 35.0116, 135.7681 cannot be turned into "Kyoto"
+by the app. Instead the map finds the photos from one place and the person who was there
+names it once. That creates a `Place`-kind tag and applies it to everything in the cluster in
+one transaction — so from then on the place is searchable, nestable under `Japan`, and
+survives backup and restore like any other tag. A coordinate stored on its own would do none
+of that.
+
+### Clustering is a fixed grid, not k-means
+O(n) with no distance matrix, which matters when n is every located photo in a 150k library.
+More importantly it is **stable**: the same photo lands in the same cell regardless of what
+else is in the library, so panning never reshuffles the groups under a half-finished gesture.
+The visible cost is a seam at cell edges; cells are chosen an order of magnitude smaller than
+the viewport, so a seam is a couple of pixels. Longitude cell width is divided by
+cos(latitude) so cells stay roughly square in kilometres instead of collapsing near the poles,
+and the pin sits on the centroid rather than the cell centre so it lands on the photos.
+
+### The backup carries albums, and albums come before items
+Album membership is hand-made data the device cannot regenerate, exactly like a tag — so the
+export set became "everything carrying a tag **or** sitting in an album", and an album of
+untagged holiday snaps now survives a reinstall too.
+
+Album records are written *before* the items so each item can carry its own membership, which
+keeps the whole file streaming in constant memory. An album's cover is therefore a forward
+reference to an item ref; the importer holds at most one pending cover per album while it
+reads, and an album whose cover photo is not on this device simply restores without one.
+
+### The viewer swipes through whatever you opened it from
+Opening a photo from an album and then swiping into the rest of the library would be a small
+betrayal of the album — the point of one is that it is a bounded, ordered set. `ViewerSource`
+makes the viewer page over the same source as the screen behind it: the library query, one
+album in the user's order, or an explicit bounded id list for a map cluster.
+
+The shared-element host was hoisted out of the grid to wrap the whole shell, so an album or a
+map cluster gets the same thumbnail-becomes-photo transition without every screen hosting its
+own copy of the viewer.
+
+### A floating nav pill instead of a `NavigationBar`
+Material's navigation bar paints an opaque 80 dp band across the bottom of the screen, which
+on a gallery means permanently hiding a row of photographs. The pill floats clear of the
+edge, is only as wide as its contents, lets the grid scroll visibly underneath, and expands
+only the selected item to its label so it stays inside the thumb arc.

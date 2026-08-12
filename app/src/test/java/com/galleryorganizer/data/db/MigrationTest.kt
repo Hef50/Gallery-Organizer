@@ -245,6 +245,68 @@ class MigrationTest {
     }
 
     @Test
+    fun `v4 to v5 adds albums and locations and defaults every existing tag to Other`() =
+        runTest {
+            seedSchema(version = 4) {
+                execSQL(
+                    """
+                    INSERT INTO media (id, content_hash, mediastore_id, uri, display_name,
+                        relative_path, bucket_id, bucket_name, mime, is_video, size, date_taken,
+                        date_modified, date_added, date_first_indexed, duration, width, height,
+                        orientation, is_missing, ocr_text, auto_scan_state)
+                    VALUES (1, 'deadbeef', 42, 'content://media/external/images/media/42',
+                        'IMG_0042.jpg', 'DCIM/Camera/', 7, 'Camera', 'image/jpeg', 0, 123456,
+                        1700000000000, 1700000000, 1700000000, 1700000000000, 0, 4032, 3024,
+                        0, 0, 'a receipt', 1)
+                    """.trimIndent(),
+                )
+                execSQL(
+                    "INSERT INTO tag (id, name, parent_id, color, last_used_at, usage_count) " +
+                        "VALUES (1, 'Travel', 0, NULL, 5, 3)",
+                )
+                execSQL(
+                    "INSERT INTO media_tag (media_id, tag_id, source, created_at) " +
+                        "VALUES (1, 1, 'manual', 1)",
+                )
+            }
+
+            val db = openThroughRoom()
+
+            // Existing tags keep everything they had and land in the default kind, so an
+            // upgrade never reshuffles someone's tag list behind their back.
+            val tag = db.tagDao().byId(1)!!
+            assertThat(tag.name).isEqualTo("Travel")
+            assertThat(tag.usageCount).isEqualTo(3)
+            assertThat(tag.kind).isEqualTo(
+                com.galleryorganizer.data.db.entity.TagKind.Note,
+            )
+
+            // Existing media are unlocated and queued for the EXIF pass, not silently
+            // marked as "no location".
+            val item = db.mediaDao().byContentHash("deadbeef")!!
+            assertThat(item.latitude).isNull()
+            assertThat(item.longitude).isNull()
+            assertThat(item.locationState).isEqualTo(0)
+            assertThat(item.ocrText).isEqualTo("a receipt")
+            assertThat(db.mediaTagDao().tagsFor(item.id).map { it.name }).containsExactly("Travel")
+            assertThat(db.mediaDao().unlocatedCount()).isEqualTo(1)
+
+            // The new tables are real and usable, and the cascade is wired up.
+            val albumId = db.albumDao().insert(
+                com.galleryorganizer.data.db.entity.AlbumEntity(name = "Japan 2019"),
+            )
+            db.albumDao().addAll(
+                listOf(
+                    com.galleryorganizer.data.db.entity.AlbumMediaCrossRef(albumId, item.id, 1000),
+                ),
+            )
+            assertThat(db.albumDao().mediaIdsIn(albumId)).containsExactly(item.id)
+
+            db.albumDao().deleteById(albumId)
+            assertThat(db.albumDao().mediaIdsIn(albumId)).isEmpty()
+        }
+
+    @Test
     fun `every registered migration forms an unbroken chain up to the current version`() {
         if (ALL_MIGRATIONS.isEmpty()) {
             assertThat(AppDatabase.VERSION).isEqualTo(1)

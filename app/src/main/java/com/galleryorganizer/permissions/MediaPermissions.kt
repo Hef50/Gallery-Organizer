@@ -40,6 +40,16 @@ object MediaPermissions {
     const val READ_MEDIA_VISUAL_USER_SELECTED: String =
         "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
 
+    /**
+     * Needed to read GPS coordinates out of a photo — MediaStore redacts them otherwise.
+     *
+     * Requested in the same dialog as the read permissions rather than on its own later:
+     * the system will not grant it without a media read grant anyway, and a second prompt
+     * days afterwards asking about location is exactly the kind of thing that makes people
+     * say no. Refusing it costs nothing but the Places screen.
+     */
+    const val ACCESS_MEDIA_LOCATION: String = Manifest.permission.ACCESS_MEDIA_LOCATION
+
     /** True on Android 14 (API 34) and later, where partial media grants exist. */
     val supportsPartialGrant: Boolean
         get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
@@ -54,15 +64,21 @@ object MediaPermissions {
     fun requestedPermissions(
         sdkInt: Int = Build.VERSION.SDK_INT,
     ): Array<String> = if (sdkInt >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-        arrayOf(READ_MEDIA_IMAGES, READ_MEDIA_VIDEO, READ_MEDIA_VISUAL_USER_SELECTED)
+        arrayOf(
+            READ_MEDIA_IMAGES,
+            READ_MEDIA_VIDEO,
+            READ_MEDIA_VISUAL_USER_SELECTED,
+            ACCESS_MEDIA_LOCATION,
+        )
     } else {
-        arrayOf(READ_MEDIA_IMAGES, READ_MEDIA_VIDEO)
+        arrayOf(READ_MEDIA_IMAGES, READ_MEDIA_VIDEO, ACCESS_MEDIA_LOCATION)
     }
 
     fun state(context: Context): MediaPermissionState = MediaPermissionState(
         images = context.isGranted(READ_MEDIA_IMAGES),
         video = context.isGranted(READ_MEDIA_VIDEO),
         userSelected = supportsPartialGrant && context.isGranted(READ_MEDIA_VISUAL_USER_SELECTED),
+        mediaLocation = context.isGranted(ACCESS_MEDIA_LOCATION),
     )
 
     private fun Context.isGranted(permission: String): Boolean =
@@ -79,6 +95,11 @@ data class MediaPermissionState(
     val images: Boolean,
     val video: Boolean,
     val userSelected: Boolean,
+    /**
+     * Deliberately absent from [access]: without it every photo simply has no location,
+     * which is a supported state rather than a broken one.
+     */
+    val mediaLocation: Boolean = false,
 ) {
     /**
      * A full grant of *either* images or video outranks a partial grant: once the system

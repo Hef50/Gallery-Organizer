@@ -62,17 +62,33 @@ class MediaPermissionStateTest {
             MediaPermissions.READ_MEDIA_IMAGES,
             MediaPermissions.READ_MEDIA_VIDEO,
             MediaPermissions.READ_MEDIA_VISUAL_USER_SELECTED,
+            MediaPermissions.ACCESS_MEDIA_LOCATION,
         )
     }
 
     @Test
-    fun `android 13 requests only the two full permissions`() {
+    fun `android 13 requests the two full permissions plus media location`() {
         // READ_MEDIA_VISUAL_USER_SELECTED does not exist on API 33 and requesting it
-        // there would be silently ignored at best.
+        // there would be silently ignored at best. ACCESS_MEDIA_LOCATION does.
         val requested = MediaPermissions.requestedPermissions(Build.VERSION_CODES.TIRAMISU)
         assertThat(requested.toList()).containsExactly(
             MediaPermissions.READ_MEDIA_IMAGES,
             MediaPermissions.READ_MEDIA_VIDEO,
+            MediaPermissions.ACCESS_MEDIA_LOCATION,
         )
+    }
+
+    @Test
+    fun `refusing the location permission does not reduce media access`() {
+        // Places is a bonus, not a dependency: a phone that says no to location still has a
+        // fully working gallery, so this must not collapse into MediaAccess.None.
+        val state = MediaPermissionState(
+            images = true,
+            video = true,
+            userSelected = false,
+            mediaLocation = false,
+        )
+        assertThat(state.access).isEqualTo(MediaAccess.Full)
+        assertThat(state.canIndex).isTrue()
     }
 }

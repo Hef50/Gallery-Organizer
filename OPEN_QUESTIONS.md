@@ -129,3 +129,48 @@ domains needed are:
 - `repo1.maven.org` — Maven Central
 - `plugins.gradle.org` — Gradle plugin portal
 - `services.gradle.org` — Gradle distribution for the wrapper
+
+---
+
+### 10. Should the map be able to show a real basemap?
+
+`PlaceMap` draws points, clusters, a graticule and a scale bar, but no coastlines or roads,
+because tiles need the network and v1 has no `INTERNET` permission. Three ways out, none of
+them obviously right:
+
+- **Bundle a coarse world vector outline.** A few hundred kilobytes for country borders would
+  orient someone looking at a continent-scale view. It would be useless at city scale, which
+  is where most of the clusters are.
+- **Let the user drop in an offline tile pack** they downloaded themselves (an `.mbtiles`
+  file via the document picker). Stays offline and gives a real map, but it is a chunky
+  feature for something most people will never do.
+- **Leave it as is.** The clusters already answer "which trip is this", and naming one turns
+  it into a searchable tag, which is what the screen is for.
+
+**Current behaviour:** the third. No basemap, and the screen says what it is showing.
+
+---
+
+### 11. Should naming a place re-run as new photos arrive?
+
+Naming a cluster tags the photos in it *at that moment*. A photo taken at the same place next
+year lands on the map in the same cluster but carries no tag, and nothing tells the user.
+
+Options: re-offer the name when a cluster containing a named photo gains untagged ones; store
+the coordinate on the tag and auto-apply within a radius (which is a standing rule, closer to
+a saved search than to a tag); or leave it manual.
+
+**Current behaviour:** manual. Re-naming the same cluster with the same name is idempotent —
+`ensureTag` merges and `applyTags` ignores conflicts — so the fix is one gesture, but the user
+has to notice.
+
+---
+
+### 12. Should an album be able to hold the same photo twice?
+
+The primary key is `(album_id, media_id)`, so it cannot. That is right for "the twelve shots
+worth showing my mother" and wrong for anything sequence-like where a photo might reasonably
+recur.
+
+**Current behaviour:** once per album, at the position where it was first added; adding it
+again is a no-op rather than a silent reorder.

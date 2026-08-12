@@ -2,7 +2,9 @@ package com.galleryorganizer.data.backup
 
 import com.galleryorganizer.data.db.AppDatabase
 import com.galleryorganizer.data.db.DbTest
+import com.galleryorganizer.data.db.entity.TagKind
 import com.galleryorganizer.data.db.entity.TagSource
+import com.galleryorganizer.data.repo.AlbumRepository
 import com.galleryorganizer.data.repo.FtsMaintenance
 import com.galleryorganizer.data.repo.SearchRepository
 import com.galleryorganizer.data.repo.TagRepository
@@ -16,7 +18,10 @@ import java.io.ByteArrayOutputStream
 class BackupRepositoryTest : DbTest() {
 
     private val tagRepo by lazy { TagRepository(db, FtsMaintenance(db), now = { 7L }) }
-    private val backup by lazy { BackupRepository(db, tagRepo, FtsMaintenance(db), now = { 7L }) }
+    private val albumRepo by lazy { AlbumRepository(db) { 7L } }
+    private val backup by lazy {
+        BackupRepository(db, tagRepo, FtsMaintenance(db), now = { 7L }, albums = albumRepo)
+    }
 
     private suspend fun exportToString(): String {
         val out = ByteArrayOutputStream()
@@ -315,5 +320,164 @@ class BackupRepositoryTest : DbTest() {
 
         assertThat(report.itemsMatched).isEqualTo(1_500)
         assertThat(mediaTags.count()).isEqualTo(1_500)
+    }
+
+    // --- Albums and tag kinds (schema v5) -----------------------------------------------
+
+    @Test
+    fun `an album survives a reinstall with its order and its cover`() = runTest {
+        val ids = media.insertAll(
+            (1L..4L).map { sampleMedia(it, contentHash = "h$it") },
+        )
+        val albumId = albumRepo.ensureAlbum("Japan 2019", "The good ones")
+        // Deliberately not in id order: the album's order is the thing being tested.
+        albumRepo.addTo(albumId, listOf(ids[2], ids[0], ids[3]))
+        albumRepo.setCover(albumId, ids[3])
+        val exported = exportToString()
+
+        val fresh = freshDatabase()
+        try {
+            val freshTags = TagRepository(fresh, FtsMaintenance(fresh), now = { 7L })
+            val freshAlbums = com.galleryorganizer.data.repo.AlbumRepository(fresh) { 7L }
+            val freshBackup = BackupRepository(
+                fresh,
+                freshTags,
+                FtsMaintenance(fresh),
+                now = { 7L },
+                albums = freshAlbums,
+            )
+            // Same files, different ids — and inserted in a different order again.
+            val freshIds = fresh.mediaDao().insertAll(
+                listOf(
+                    sampleMedia(904, contentHash = "h4"),
+                    sampleMedia(901, contentHash = "h1"),
+                    sampleMedia(903, contentHash = "h3"),
+                    sampleMedia(902, contentHash = "h2"),
+                ),
+            )
+
+            val report = freshBackup.import(ByteArrayInputStream(exported.toByteArray()))
+
+            assertThat(report.albumsCreated).isEqualTo(1)
+            assertThat(report.albumMembershipsApplied).isEqualTo(3)
+
+            val restored = fresh.albumDao().byName("Japan 2019")!!
+            assertThat(restored.description).isEqualTo("The good ones")
+
+            // h3, h1, h4 — the exported order, not the insertion order.
+            val byHash = fresh.albumDao().mediaIdsIn(restored.id).map { id ->
+                fresh.mediaDao().byId(id)!!.contentHash
+            }
+            assertThat(byHash).containsExactly("h3", "h1", "h4").inOrder()
+
+            // The cover pointed at h4, which is a different row id on this device.
+            assertThat(restored.coverMediaId).isEqualTo(freshIds[0])
+        } finally {
+            fresh.close()
+        }
+    }
+
+    @Test
+    fun `an untagged photo is exported because an album is holding it`() = runTest {
+        val ids = media.insertAll((1L..3L).map { sampleMedia(it, contentHash = "h$it") })
+        val albumId = albumRepo.ensureAlbum("Untagged but kept")
+        albumRepo.addTo(albumId, listOf(ids[0]))
+
+        val stats = ByteArrayOutputStream().let { out -> backup.export(out) }
+
+        // Album membership is hand-made data too — losing it would be as bad as losing tags.
+        assertThat(stats.items).isEqualTo(1)
+        assertThat(stats.albums).isEqualTo(1)
+        assertThat(stats.albumMemberships).isEqualTo(1)
+    }
+
+    @Test
+    fun `importing into a database that already has the album merges rather than duplicates`() =
+        runTest {
+            val ids = media.insertAll(listOf(sampleMedia(1, contentHash = "h1")))
+            val albumId = albumRepo.ensureAlbum("Holiday")
+            albumRepo.addTo(albumId, ids)
+            val exported = exportToString()
+
+            val report = importFrom(exported)
+
+            assertThat(report.albumsMerged).isEqualTo(1)
+            assertThat(report.albumsCreated).isEqualTo(0)
+            assertThat(db.albumDao().count()).isEqualTo(1)
+            // Re-importing must not put the same photo in twice.
+            assertThat(db.albumDao().mediaIdsIn(albumId)).containsExactly(ids.single())
+        }
+
+    @Test
+    fun `an album whose cover is not on this phone still restores`() = runTest {
+        val ids = media.insertAll(
+            listOf(sampleMedia(1, contentHash = "h1"), sampleMedia(2, contentHash = "h2")),
+        )
+        val albumId = albumRepo.ensureAlbum("Half here")
+        albumRepo.addTo(albumId, ids)
+        albumRepo.setCover(albumId, ids[1])
+        val exported = exportToString()
+
+        val fresh = freshDatabase()
+        try {
+            val freshTags = TagRepository(fresh, FtsMaintenance(fresh), now = { 7L })
+            val freshBackup = BackupRepository(
+                fresh,
+                freshTags,
+                FtsMaintenance(fresh),
+                now = { 7L },
+                albums = com.galleryorganizer.data.repo.AlbumRepository(fresh) { 7L },
+            )
+            // Only the first photo made it across.
+            fresh.mediaDao().insertAll(listOf(sampleMedia(901, contentHash = "h1")))
+
+            val report = freshBackup.import(ByteArrayInputStream(exported.toByteArray()))
+
+            assertThat(report.albumsCreated).isEqualTo(1)
+            assertThat(report.itemsUnmatched).isEqualTo(1)
+            val restored = fresh.albumDao().byName("Half here")!!
+            // No cover rather than a dangling one; the shelf falls back to the first member.
+            assertThat(restored.coverMediaId).isNull()
+            assertThat(fresh.albumDao().mediaIdsIn(restored.id)).hasSize(1)
+        } finally {
+            fresh.close()
+        }
+    }
+
+    @Test
+    fun `tag kinds travel with the backup`() = runTest {
+        val ids = media.insertAll(listOf(sampleMedia(1, contentHash = "h1")))
+        val anna = tagRepo.ensureTag("Anna", kind = TagKind.Person)
+        val kyoto = tagRepo.ensureTag("Kyoto", kind = TagKind.Place)
+        tagRepo.applyTags(ids, listOf(anna, kyoto))
+        val exported = exportToString()
+
+        val fresh = freshDatabase()
+        try {
+            val freshTags = TagRepository(fresh, FtsMaintenance(fresh), now = { 7L })
+            val freshBackup = BackupRepository(fresh, freshTags, FtsMaintenance(fresh), now = { 7L })
+            fresh.mediaDao().insertAll(listOf(sampleMedia(901, contentHash = "h1")))
+
+            freshBackup.import(ByteArrayInputStream(exported.toByteArray()))
+
+            assertThat(fresh.tagDao().byNameUnder(0, "Anna")!!.kind).isEqualTo(TagKind.Person)
+            assertThat(fresh.tagDao().byNameUnder(0, "Kyoto")!!.kind).isEqualTo(TagKind.Place)
+        } finally {
+            fresh.close()
+        }
+    }
+
+    @Test
+    fun `restoring an older backup does not reset a kind chosen on this device`() = runTest {
+        val ids = media.insertAll(listOf(sampleMedia(1, contentHash = "h1")))
+        val anna = tagRepo.ensureTag("Anna")
+        tagRepo.applyTags(ids, listOf(anna))
+        // A v1-era file: every tag record says "note", because kinds did not exist.
+        val exported = exportToString()
+
+        tagRepo.setKind(anna, TagKind.Person)
+        importFrom(exported)
+
+        assertThat(db.tagDao().byId(anna)!!.kind).isEqualTo(TagKind.Person)
     }
 }

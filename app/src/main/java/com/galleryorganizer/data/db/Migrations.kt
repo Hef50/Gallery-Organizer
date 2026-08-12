@@ -101,4 +101,65 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
-val ALL_MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+/**
+ * v4 → v5: albums, tag kinds, and EXIF location.
+ *
+ * Three additive changes, no rewrites:
+ *
+ * - `album` / `album_media` for hand-curated collections.
+ * - `tag.kind`, defaulting to `note` so every existing tag keeps working and simply lands
+ *   in "Other" until the user says otherwise.
+ * - `media.latitude` / `longitude` / `location_state`, defaulting to NULL and 0 so every
+ *   existing row is queued for a location read rather than assumed to have none.
+ *
+ * The DDL is copied verbatim from Room's generated v5 schema; the migration test is what
+ * proves it, since a single character of drift makes Room refuse to open the database.
+ */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `tag` ADD COLUMN `kind` TEXT NOT NULL DEFAULT 'note'")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_tag_kind` ON `tag` (`kind`)")
+
+        db.execSQL("ALTER TABLE `media` ADD COLUMN `latitude` REAL")
+        db.execSQL("ALTER TABLE `media` ADD COLUMN `longitude` REAL")
+        db.execSQL("ALTER TABLE `media` ADD COLUMN `location_state` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_media_location_state` ON `media` (`location_state`)")
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_media_latitude_longitude` " +
+                "ON `media` (`latitude`, `longitude`)",
+        )
+
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `album` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`name` TEXT NOT NULL COLLATE NOCASE, " +
+                "`description` TEXT NOT NULL, " +
+                "`cover_media_id` INTEGER, " +
+                "`created_at` INTEGER NOT NULL, " +
+                "`updated_at` INTEGER NOT NULL, " +
+                "`sort_order` INTEGER NOT NULL)",
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_album_name` ON `album` (`name`)")
+
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `album_media` (" +
+                "`album_id` INTEGER NOT NULL, " +
+                "`media_id` INTEGER NOT NULL, " +
+                "`position` INTEGER NOT NULL, " +
+                "`added_at` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`album_id`, `media_id`), " +
+                "FOREIGN KEY(`album_id`) REFERENCES `album`(`id`) " +
+                "ON UPDATE NO ACTION ON DELETE CASCADE , " +
+                "FOREIGN KEY(`media_id`) REFERENCES `media`(`id`) " +
+                "ON UPDATE NO ACTION ON DELETE CASCADE )",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_album_media_media_id` ON `album_media` (`media_id`)")
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_album_media_album_id_position` " +
+                "ON `album_media` (`album_id`, `position`)",
+        )
+    }
+}
+
+val ALL_MIGRATIONS: Array<Migration> =
+    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)

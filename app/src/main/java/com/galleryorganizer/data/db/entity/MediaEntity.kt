@@ -47,6 +47,9 @@ import androidx.room.PrimaryKey
         // per backed-up item. Without the index it is a full table scan each time.
         Index(value = ["size", "display_name"]),
         Index(value = ["auto_scan_state"]),
+        Index(value = ["location_state"]),
+        // Places clusters by bounding box, which needs both columns together.
+        Index(value = ["latitude", "longitude"]),
     ],
 )
 data class MediaEntity(
@@ -159,10 +162,33 @@ data class MediaEntity(
      */
     @ColumnInfo(name = "auto_scan_state")
     val autoScanState: Int = AUTO_SCAN_PENDING,
+
+    /**
+     * Where the photo was taken, from EXIF, added in schema v5. Null when the file carries
+     * no GPS tag — which is most screenshots, most downloads, and anything shot with
+     * location off.
+     *
+     * Read separately from the rest of the metadata because MediaStore *redacts* location
+     * from the copy it hands out: getting it requires `ACCESS_MEDIA_LOCATION` and asking
+     * for the original file explicitly. See `LocationExtractor`.
+     */
+    @ColumnInfo(name = "latitude")
+    val latitude: Double? = null,
+
+    @ColumnInfo(name = "longitude")
+    val longitude: Double? = null,
+
+    /** 0 = not looked at, 1 = read (with or without a result), 2 = could not be read. */
+    @ColumnInfo(name = "location_state")
+    val locationState: Int = LOCATION_PENDING,
 ) {
     companion object {
         const val AUTO_SCAN_PENDING = 0
         const val AUTO_SCAN_DONE = 1
         const val AUTO_SCAN_FAILED = 2
+
+        const val LOCATION_PENDING = 0
+        const val LOCATION_READ = 1
+        const val LOCATION_FAILED = 2
     }
 }

@@ -2,10 +2,13 @@ package com.galleryorganizer.data.backup
 
 import androidx.room.withTransaction
 import com.galleryorganizer.data.db.AppDatabase
+import com.galleryorganizer.data.db.entity.AlbumMediaCrossRef
 import com.galleryorganizer.data.db.entity.MediaTagCrossRef
 import com.galleryorganizer.data.db.entity.SavedSearchEntity
 import com.galleryorganizer.data.db.entity.TagEntity
+import com.galleryorganizer.data.db.entity.TagKind
 import com.galleryorganizer.data.db.entity.TagSource
+import com.galleryorganizer.data.repo.AlbumRepository
 import com.galleryorganizer.data.repo.FtsMaintenance
 import com.galleryorganizer.data.repo.TagRepository
 import com.galleryorganizer.domain.search.SearchQuery
@@ -33,6 +36,7 @@ class BackupRepository(
     private val fts: FtsMaintenance = FtsMaintenance(db),
     private val now: () -> Long = System::currentTimeMillis,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    private val albums: AlbumRepository = AlbumRepository(db, now),
 ) {
 
     // --- Export -----------------------------------------------------------------------
@@ -54,7 +58,8 @@ class BackupRepository(
         var stats = BackupStats()
 
         val allTags = db.tagDao().allTags()
-        val total = db.mediaDao().taggedCount()
+        val allAlbums = db.albumDao().allAlbums()
+        val total = db.mediaDao().backupCount()
 
         writer.writeRecord(
             BackupHeader(
@@ -63,27 +68,49 @@ class BackupRepository(
                 tagCount = allTags.size,
                 itemCount = total,
                 savedSearchCount = db.savedSearchDao().count(),
+                albumCount = allAlbums.size,
             ),
         )
 
         val paths = tagPaths(allTags)
         for (tag in allTags) {
             writer.writeRecord(
-                TagRecord(ref = tag.id, path = paths.getValue(tag.id), color = tag.color),
+                TagRecord(
+                    ref = tag.id,
+                    path = paths.getValue(tag.id),
+                    color = tag.color,
+                    kind = tag.kind.wire,
+                ),
             )
         }
         stats = stats.copy(tags = allTags.size)
 
+        // Albums go out before items so each item can carry its own membership and the file
+        // still streams. The cover is a forward reference to an item ref — see AlbumRecord.
+        for (album in allAlbums) {
+            writer.writeRecord(
+                AlbumRecord(
+                    ref = album.id,
+                    name = album.name,
+                    description = album.description,
+                    coverRef = album.coverMediaId,
+                ),
+            )
+        }
+        stats = stats.copy(albums = allAlbums.size)
+
         var offset = 0
         var written = 0
         var assignments = 0
+        var memberships = 0
         while (true) {
             currentCoroutineContext().ensureActive()
-            val ids = db.mediaDao().taggedIdsPage(PAGE, offset)
+            val ids = db.mediaDao().backupIdsPage(PAGE, offset)
             if (ids.isEmpty()) break
 
             val rows = db.mediaDao().byIds(ids).associateBy { it.id }
             val assignmentsByMedia = db.mediaTagDao().rowsForMany(ids).groupBy { it.mediaId }
+            val albumsByMedia = db.albumDao().membershipsForMany(ids).groupBy { it.mediaId }
 
             for (id in ids) {
                 val media = rows[id] ?: continue
@@ -95,19 +122,31 @@ class BackupRepository(
                         size = media.size,
                         dateTaken = media.dateTaken,
                         ocrText = media.ocrText,
+                        // The local row id doubles as the file-local ref. It is meaningless
+                        // on the importing device, which is exactly why it is only ever used
+                        // to join records inside one file.
+                        ref = media.id,
                         tags = assignmentsByMedia[id].orEmpty().map {
                             TagAssignment(it.tagId, it.source.wire, it.createdAt)
+                        },
+                        albums = albumsByMedia[id].orEmpty().map {
+                            AlbumMembership(it.albumId, it.position)
                         },
                     ),
                 )
                 assignments += assignmentsByMedia[id]?.size ?: 0
+                memberships += albumsByMedia[id]?.size ?: 0
                 written++
             }
             offset += ids.size
             onProgress(written, total)
             if (ids.size < PAGE) break
         }
-        stats = stats.copy(items = written, assignments = assignments)
+        stats = stats.copy(
+            items = written,
+            assignments = assignments,
+            albumMemberships = memberships,
+        )
 
         val searches = db.savedSearchDao().all()
         for (saved in searches) {
@@ -155,6 +194,9 @@ class BackupRepository(
     ): ImportReport = withContext(io) {
         var report = ImportReport()
         val tagIdByRef = HashMap<Long, Long>()
+        val albumIdByRef = HashMap<Long, Long>()
+        /** albumRef → the item ref it wants as a cover, resolved as items stream past. */
+        val pendingCovers = HashMap<Long, Long>()
         var sawHeader = false
         var read = 0
 
@@ -191,10 +233,29 @@ class BackupRepository(
                             report.copy(tagsCreated = report.tagsCreated + 1)
                         }
                         record.color?.let { tags.setColor(id, it) }
+                        // Only kind a tag this file actually classified. Re-kinding an
+                        // existing tag from a v1 file's implicit "note" would undo work the
+                        // user did on this device.
+                        if (existing == null && record.kind != TagKind.Note.wire) {
+                            tags.setKind(id, TagKind.fromWire(record.kind))
+                        }
+                    }
+
+                    is AlbumRecord -> {
+                        val existing = db.albumDao().byName(record.name.trim())
+                        val id = albums.ensureAlbum(record.name, record.description)
+                        albumIdByRef[record.ref] = id
+                        report = if (existing != null) {
+                            report.copy(albumsMerged = report.albumsMerged + 1)
+                        } else {
+                            report.copy(albumsCreated = report.albumsCreated + 1)
+                        }
+                        record.coverRef?.let { pendingCovers[record.ref] = it }
                     }
 
                     is ItemRecord -> {
-                        report = applyItem(record, tagIdByRef, report)
+                        report = applyItem(record, tagIdByRef, albumIdByRef, report)
+                        resolveCovers(record, albumIdByRef, pendingCovers)
                         read++
                         if (read % PROGRESS_EVERY == 0) onProgress(read)
                     }
@@ -209,9 +270,39 @@ class BackupRepository(
         report
     }
 
+    /**
+     * Points an album at its cover once the item carrying that ref has been matched.
+     *
+     * A cover whose photo is not on this device simply stays unset, and the shelf falls back
+     * to the album's first member — which is why `cover_media_id` is not a foreign key.
+     */
+    private suspend fun resolveCovers(
+        record: ItemRecord,
+        albumIdByRef: Map<Long, Long>,
+        pending: MutableMap<Long, Long>,
+    ) {
+        if (pending.isEmpty() || record.ref == 0L) return
+        val wanting = pending.filterValues { it == record.ref }.keys
+        if (wanting.isEmpty()) return
+
+        val local = matchesFor(record).firstOrNull()?.id
+        wanting.forEach { albumRef ->
+            pending.remove(albumRef)
+            val albumId = albumIdByRef[albumRef] ?: return@forEach
+            if (local != null) albums.setCover(albumId, local)
+        }
+    }
+
+    /** The local rows this exported item corresponds to. See [applyItem] for the two tiers. */
+    private suspend fun matchesFor(record: ItemRecord) =
+        record.hash?.let { db.mediaDao().byContentHashAll(it) }
+            ?.takeIf { it.isNotEmpty() }
+            ?: db.mediaDao().bySizeAndName(record.size, record.displayName)
+
     private suspend fun applyItem(
         record: ItemRecord,
         tagIdByRef: Map<Long, Long>,
+        albumIdByRef: Map<Long, Long>,
         report: ImportReport,
     ): ImportReport {
         val byHash = record.hash?.let { db.mediaDao().byContentHashAll(it) }.orEmpty()
@@ -238,9 +329,27 @@ class BackupRepository(
             }
         }.flatten()
 
+        // Album membership keeps its exported position, so an album restores in the order
+        // the user arranged it rather than in whatever order the file happened to be read.
+        val albumRows = record.albums.mapNotNull { membership ->
+            val albumId = albumIdByRef[membership.album] ?: return@mapNotNull null
+            matches.map { media ->
+                AlbumMediaCrossRef(
+                    albumId = albumId,
+                    mediaId = media.id,
+                    position = membership.position,
+                    addedAt = now(),
+                )
+            }
+        }.flatten()
+
         var ocrRestored = 0
+        var membershipsApplied = 0
         db.withTransaction {
             if (rows.isNotEmpty()) db.mediaTagDao().insertIgnoring(rows)
+            if (albumRows.isNotEmpty()) {
+                membershipsApplied = db.albumDao().addAll(albumRows).count { it != -1L }
+            }
             if (!record.ocrText.isNullOrBlank()) {
                 matches.filter { it.ocrText.isNullOrBlank() }.forEach {
                     db.mediaDao().setOcrText(it.id, record.ocrText)
@@ -254,6 +363,7 @@ class BackupRepository(
             itemsMatchedByHash = report.itemsMatchedByHash + if (byHash.isNotEmpty()) 1 else 0,
             itemsMatchedByName = report.itemsMatchedByName + if (byHash.isEmpty()) 1 else 0,
             assignmentsApplied = report.assignmentsApplied + rows.size,
+            albumMembershipsApplied = report.albumMembershipsApplied + membershipsApplied,
             ocrRestored = report.ocrRestored + ocrRestored,
         )
     }

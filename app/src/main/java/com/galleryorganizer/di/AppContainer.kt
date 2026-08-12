@@ -8,8 +8,10 @@ import com.galleryorganizer.data.media.ContentResolverMediaStoreSource
 import com.galleryorganizer.data.media.MediaStoreSource
 import com.galleryorganizer.data.prefs.SettingsStore
 import com.galleryorganizer.data.ml.MlKitImageAnalyzer
+import com.galleryorganizer.data.repo.AlbumRepository
 import com.galleryorganizer.data.repo.AutoTagger
 import com.galleryorganizer.data.repo.FtsMaintenance
+import com.galleryorganizer.data.repo.LocationRepository
 import com.galleryorganizer.data.repo.MediaIndexer
 import com.galleryorganizer.data.repo.MediaRepository
 import com.galleryorganizer.data.repo.SearchRepository
@@ -40,6 +42,12 @@ class AppContainer(context: Context) {
     }
 
     val tagRepository: TagRepository by lazy { TagRepository(database, ftsMaintenance) }
+
+    val albumRepository: AlbumRepository by lazy { AlbumRepository(database) }
+
+    val locationRepository: LocationRepository by lazy {
+        LocationRepository(database, appContext.contentResolver, tagRepository)
+    }
 
     val searchRepository: SearchRepository by lazy { SearchRepository(database) }
 

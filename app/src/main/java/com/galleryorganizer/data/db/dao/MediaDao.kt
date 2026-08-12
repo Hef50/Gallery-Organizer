@@ -101,6 +101,19 @@ interface MediaDao {
     )
     suspend fun allIdsInGridOrder(limit: Int): List<Long>
 
+    /**
+     * A bounded, explicit set of items — what the viewer swipes through when it was opened
+     * from something with no query behind it, such as a map cluster. Newest first, matching
+     * how that set was presented.
+     */
+    @Query(
+        """
+        SELECT * FROM media WHERE id IN (:ids) AND is_missing = 0
+        ORDER BY date_taken DESC, id DESC
+        """,
+    )
+    fun pagingSourceForIds(ids: List<Long>): PagingSource<Int, MediaEntity>
+
     @Query("SELECT * FROM media WHERE id = :id")
     suspend fun byId(id: Long): MediaEntity?
 
@@ -233,6 +246,31 @@ interface MediaDao {
     @Query("SELECT COUNT(DISTINCT media_id) FROM media_tag")
     suspend fun taggedCount(): Int
 
+    /**
+     * The export set: everything carrying a tag *or* sitting in an album.
+     *
+     * Album membership is hand-made data the device cannot regenerate, exactly like a tag,
+     * so an album of untagged holiday snaps has to survive a reinstall too. `UNION` rather
+     * than `UNION ALL` so an item that is both only appears once.
+     */
+    @Query(
+        """
+        SELECT id FROM media WHERE id IN (
+            SELECT media_id FROM media_tag UNION SELECT media_id FROM album_media
+        ) ORDER BY id LIMIT :limit OFFSET :offset
+        """,
+    )
+    suspend fun backupIdsPage(limit: Int, offset: Int): List<Long>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM (
+            SELECT media_id FROM media_tag UNION SELECT media_id FROM album_media
+        )
+        """,
+    )
+    suspend fun backupCount(): Int
+
     /** Paged presence projection for the indexer's missing-file sweep. */
     @Query("SELECT id, mediastore_id, is_missing FROM media ORDER BY id LIMIT :limit OFFSET :offset")
     suspend fun presencePage(limit: Int, offset: Int): List<MediaPresenceRow>
@@ -274,6 +312,73 @@ interface MediaDao {
     @Query("SELECT * FROM media WHERE content_hash = :hash AND is_missing = 0 ORDER BY date_added ASC")
     suspend fun byContentHashAll(hash: String): List<MediaEntity>
 
+    // --- Location (schema v5) ----------------------------------------------------------
+
+    /**
+     * Backfill targets for the EXIF location pass, newest first: a photo taken last week is
+     * far more likely to be looked for on the map than one from 2013, and the worker may
+     * never reach the end of a 150k library.
+     *
+     * Videos are included — MediaStore stores coordinates for them too, and a trip's videos
+     * belong on the same map as its photos.
+     */
+    @Query(
+        """
+        SELECT id, uri, size, date_taken FROM media
+        WHERE location_state = 0 AND is_missing = 0
+        ORDER BY date_taken DESC LIMIT :limit
+        """,
+    )
+    suspend fun unlocatedTargets(limit: Int): List<MediaHashTarget>
+
+    @Query("SELECT COUNT(*) FROM media WHERE location_state = 0 AND is_missing = 0")
+    suspend fun unlocatedCount(): Int
+
+    @Query(
+        "UPDATE media SET latitude = :latitude, longitude = :longitude, location_state = :state " +
+            "WHERE id = :id",
+    )
+    suspend fun setLocation(id: Long, latitude: Double?, longitude: Double?, state: Int)
+
+    @Query("SELECT COUNT(*) FROM media WHERE latitude IS NOT NULL AND is_missing = 0")
+    fun observeLocatedCount(): Flow<Int>
+
+    /**
+     * Every located item, as the three numbers the map needs.
+     *
+     * A whole-library read looks alarming until you count it: photos with GPS are a small
+     * minority of a camera roll, and three primitives per row is ~24 bytes, so even an
+     * unusually well-tagged 150k library is a couple of megabytes held for as long as the
+     * map screen is open. Clustering needs every point at once — it cannot be paged — and
+     * the alternative is a server-side spatial index this app has no business having.
+     */
+    @Query(
+        """
+        SELECT id, latitude AS lat, longitude AS lon FROM media
+        WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND is_missing = 0
+        ORDER BY date_taken DESC
+        """,
+    )
+    suspend fun locatedPoints(): List<MediaPoint>
+
+    /** The items inside a map cluster's bounding box, newest first. */
+    @Query(
+        """
+        SELECT * FROM media
+        WHERE is_missing = 0
+          AND latitude BETWEEN :minLat AND :maxLat
+          AND longitude BETWEEN :minLon AND :maxLon
+        ORDER BY date_taken DESC LIMIT :limit
+        """,
+    )
+    suspend fun inBoundingBox(
+        minLat: Double,
+        maxLat: Double,
+        minLon: Double,
+        maxLon: Double,
+        limit: Int,
+    ): List<MediaEntity>
+
     // --- Folders (P6/P10) -------------------------------------------------------------
 
     @Query(
@@ -290,4 +395,11 @@ data class BucketSummary(
     val bucketId: Long,
     val bucketName: String,
     val itemCount: Int,
+)
+
+/** One dot on the map. Deliberately as small as a row can be — see [MediaDao.locatedPoints]. */
+data class MediaPoint(
+    val id: Long,
+    val lat: Double,
+    val lon: Double,
 )

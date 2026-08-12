@@ -56,15 +56,24 @@ and reconcile it on every index pass.
 ## Schema (extend as needed; document changes)
 
 ```
-media(id, content_hash UNIQUE, mediastore_id, uri, display_name, relative_path,
+media(id, content_hash, mediastore_id, uri, display_name, relative_path,
       bucket_id, mime, size, date_taken, date_modified, duration, width, height,
-      is_missing)
-tag(id, name, parent_id, color)          -- hierarchical
+      is_missing, latitude, longitude, location_state)
+tag(id, name, parent_id, color, kind)    -- hierarchical; kind: person|place|event|thing|note
 media_tag(media_id, tag_id, source)      -- source: manual | auto | imported
+album(id, name, description, cover_media_id, sort_order)
+album_media(album_id, media_id, position)  -- position is the user's own order
 saved_search(id, name, query_json)
 index_state(key, value)
 media_fts(...)                           -- FTS over name, tags, ocr_text
 ```
+
+`content_hash` is indexed but **not unique**, a deliberate deviation from the brief's sketch:
+a unique index would make the second copy of a duplicated file un-insertable and P10's
+duplicate finder impossible. See `DECISIONS.md`.
+
+Three separate things group photos and none collapses into another: a **tag** describes,
+an **album** is an ordered hand-made sequence, a **saved search** is a standing question.
 
 ## Phases — each independently shippable
 
@@ -85,6 +94,18 @@ one per phase; the phase boundaries live in the commit history (see `DECISIONS.m
 | P8  | XMP write-back (best effort): `dc:subject` for JPEG/PNG/HEIC, sidecar `.xmp` otherwise (incl. video). DB stays authoritative. Write temp → verify → replace |
 | P9  | On-device auto-tagging: ML Kit labeling + OCR in an idle worker, `source='auto'`, never overwrites manual tags. User reviews/promotes suggestions |
 | P10 | Polish: dark theme, empty states, duplicate finder via `content_hash`, "recently added", per-folder hiding |
+| P11 | Redesign: spring motion vocabulary, pinch-to-zoom grid density, shared-element photo viewer |
+| P12 | Organisation: albums, Places (offline map from EXIF), typed tags, four-section nav |
+
+## Permissions
+
+`READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`, `READ_MEDIA_VISUAL_USER_SELECTED` (Android 14+),
+`POST_NOTIFICATIONS`, and `ACCESS_MEDIA_LOCATION`. The last one is what makes the Places
+screen possible — MediaStore redacts GPS from the file it hands an app without it — and is
+requested in the same dialog as the reads. Refusing it costs Places and nothing else.
+
+**Still no `INTERNET`.** Nothing about a coordinate leaves the device, there is no reverse
+geocoding, and the map draws no tiles. See `DECISIONS.md`.
 
 ## Process rules
 
@@ -102,7 +123,7 @@ one per phase; the phase boundaries live in the commit history (see `DECISIONS.m
 ## Build commands
 
 ```bash
-./gradlew testDebugUnitTest     # 223 JVM unit tests — must always pass
+./gradlew testDebugUnitTest     # 248 JVM unit tests — must always pass
 ./gradlew lintDebug             # must be clean; CI fails on any lint error
 ./gradlew assembleDebug         # app/build/outputs/apk/debug/app-debug.apk (~95 MB, arm64)
 ```
@@ -120,6 +141,10 @@ Needs JDK 17+ and an Android SDK with platform 35 (`ANDROID_HOME`, or `sdk.dir` 
   `(is_missing, date_taken, id)` and `(bucket_id, date_taken)`. `QueryPlanTest` caught
   SQLite choosing the two-value `is_missing` index for the grid and then sorting the entire
   result in a temp B-tree; the composites carry the sort so `LIMIT` stops early.
+- **v5** — organisation: `album` + `album_media` (with an explicit sparse `position`),
+  `tag.kind`, and `media.latitude` / `longitude` / `location_state` plus their indices.
+  Backup format version 2 carries albums and tag kinds; the format string is unchanged and
+  every new field is defaulted, so v1 files still restore completely.
 
 Every migration has a test in `MigrationTest` that rebuilds the old schema from Room's
 committed exported JSON, writes representative rows, migrates, and asserts nothing was

@@ -1,13 +1,26 @@
 package com.galleryorganizer.domain.model
 
 import com.galleryorganizer.data.db.dao.TagWithCount
+import com.galleryorganizer.data.db.entity.TagKind
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 class TagTreeTest {
 
-    private fun tag(id: Long, name: String, parent: Long = 0, count: Int = 0) =
-        TagWithCount(id = id, name = name, parentId = parent, color = null, itemCount = count)
+    private fun tag(
+        id: Long,
+        name: String,
+        parent: Long = 0,
+        count: Int = 0,
+        kind: TagKind = TagKind.Note,
+    ) = TagWithCount(
+        id = id,
+        name = name,
+        parentId = parent,
+        color = null,
+        kind = kind,
+        itemCount = count,
+    )
 
     @Test
     fun `the forest nests and sorts siblings case-insensitively`() {
@@ -128,5 +141,39 @@ class TagTreeTest {
     @Test
     fun `an empty tag table is an empty forest, not a crash`() {
         assertThat(buildTagTree(emptyList())).isEmpty()
+    }
+
+    @Test
+    fun `sections come back in kind order with the empty ones dropped`() {
+        val tree = buildTagTree(
+            listOf(
+                tag(1, "Anna", kind = TagKind.Person),
+                tag(2, "Kyoto", kind = TagKind.Place),
+                tag(3, "Bikes", kind = TagKind.Thing),
+                tag(4, "Ben", kind = TagKind.Person),
+            ),
+        )
+
+        val sections = tree.groupedByKind()
+
+        assertThat(sections.map { it.first })
+            .containsExactly(TagKind.Person, TagKind.Place, TagKind.Thing).inOrder()
+        assertThat(sections.first().second.map { it.name }).containsExactly("Anna", "Ben")
+    }
+
+    @Test
+    fun `a child stays in its parent's section even if its own kind was changed`() {
+        val tree = buildTagTree(
+            listOf(
+                tag(1, "Japan", kind = TagKind.Place),
+                tag(2, "Kyoto", parent = 1, kind = TagKind.Note),
+            ),
+        )
+
+        val sections = tree.groupedByKind()
+
+        assertThat(sections.map { it.first }).containsExactly(TagKind.Place)
+        assertThat(sections.single().second.single().children.map { it.name })
+            .containsExactly("Kyoto")
     }
 }

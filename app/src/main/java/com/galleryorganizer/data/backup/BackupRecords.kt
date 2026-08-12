@@ -30,10 +30,18 @@ data class BackupHeader(
     val tagCount: Int = 0,
     val itemCount: Int = 0,
     val savedSearchCount: Int = 0,
+    val albumCount: Int = 0,
 ) : BackupRecord {
     companion object {
         const val FORMAT = "gallery-organizer-backup"
-        const val VERSION = 1
+
+        /**
+         * 2 added albums and tag kinds. The format string is deliberately unchanged: every
+         * new field has a default and the reader ignores unknown keys, so a v1 file still
+         * restores completely into this build, and a v2 file degrades rather than fails on
+         * an older one.
+         */
+        const val VERSION = 2
     }
 }
 
@@ -50,6 +58,12 @@ data class TagRecord(
     val ref: Long,
     val path: List<String>,
     val color: Int? = null,
+    /**
+     * [com.galleryorganizer.data.db.entity.TagKind.wire]. A string rather than an ordinal so
+     * that reordering the enum cannot silently turn everyone's People into Places, and
+     * defaulted so a v1 file reads as untyped.
+     */
+    val kind: String = "note",
 ) : BackupRecord
 
 @Serializable
@@ -57,6 +71,29 @@ data class TagAssignment(
     val tag: Long,
     val source: String = "manual",
     val createdAt: Long = 0,
+)
+
+/**
+ * An album, written *before* the items so membership can ride along on each item record and
+ * the whole file still streams in constant memory.
+ *
+ * [coverRef] is therefore a forward reference to an item's [ItemRecord.ref]; the importer
+ * holds at most one pending cover per album while it reads.
+ */
+@Serializable
+@SerialName("album")
+data class AlbumRecord(
+    val ref: Long,
+    val name: String,
+    val description: String = "",
+    val coverRef: Long? = null,
+) : BackupRecord
+
+/** Where an item sits in an album. [position] preserves the user's order. */
+@Serializable
+data class AlbumMembership(
+    val album: Long,
+    val position: Long = 0,
 )
 
 /**
@@ -78,6 +115,9 @@ data class ItemRecord(
     val tags: List<TagAssignment> = emptyList(),
     /** Expensive to regenerate — it is minutes of ML Kit over the library. */
     val ocrText: String? = null,
+    /** Only meaningful inside a single file; albums point at it. 0 in v1 files. */
+    val ref: Long = 0,
+    val albums: List<AlbumMembership> = emptyList(),
 ) : BackupRecord
 
 @Serializable
@@ -94,6 +134,8 @@ data class BackupStats(
     val items: Int = 0,
     val assignments: Int = 0,
     val savedSearches: Int = 0,
+    val albums: Int = 0,
+    val albumMemberships: Int = 0,
 )
 
 /** What an import did, in the words the confirmation screen uses. */
@@ -106,6 +148,9 @@ data class ImportReport(
     val assignmentsApplied: Int = 0,
     val savedSearchesImported: Int = 0,
     val savedSearchesSkipped: Int = 0,
+    val albumsCreated: Int = 0,
+    val albumsMerged: Int = 0,
+    val albumMembershipsApplied: Int = 0,
     val ocrRestored: Int = 0,
     val malformedLines: Int = 0,
     val wrongFormat: Boolean = false,

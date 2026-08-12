@@ -230,8 +230,9 @@ fun SettingsScreen(
             title = { Text("Backup saved") },
             text = {
                 Text(
-                    "%,d tags, %,d tagged items and %,d saved searches.".format(
+                    "%,d tags, %,d albums, %,d items and %,d saved searches.".format(
                         state.stats.tags,
+                        state.stats.albums,
                         state.stats.items,
                         state.stats.savedSearches,
                     ) + "\n\nKeep a copy somewhere other than this phone.",
@@ -394,6 +395,12 @@ internal fun com.galleryorganizer.data.backup.ImportReport.describe(): String = 
         append("%,d items matched — %,d by contents, %,d by name and size.\n"
             .format(itemsMatched, itemsMatchedByHash, itemsMatchedByName))
         append("%,d tags applied.".format(assignmentsApplied))
+        if (albumsCreated > 0 || albumsMerged > 0) {
+            append(
+                "\n%,d albums restored (%,d already existed), %,d photos put back in them."
+                    .format(albumsCreated, albumsMerged, albumMembershipsApplied),
+            )
+        }
         if (ocrRestored > 0) append("\n%,d items got their scanned text back.".format(ocrRestored))
         if (savedSearchesImported > 0) {
             append("\n%,d saved searches added".format(savedSearchesImported))

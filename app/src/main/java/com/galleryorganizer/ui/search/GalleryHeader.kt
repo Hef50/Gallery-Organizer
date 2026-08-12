@@ -14,11 +14,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -79,7 +82,6 @@ fun GalleryHeader(
     onDeleteSaved: (SavedSearch) -> Unit,
     onTogglePin: (SavedSearch) -> Unit,
     onSelectAll: () -> Unit,
-    onOpenTags: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     var naming by remember { mutableStateOf(false) }
@@ -107,7 +109,6 @@ fun GalleryHeader(
             if (filtering) {
                 HeaderAction(Icons.Rounded.SelectAll, "Select all results", onSelectAll)
             }
-            HeaderAction(Icons.Rounded.Sell, "Tags", onOpenTags)
             HeaderAction(Icons.Rounded.Settings, "Settings", onOpenSettings)
         }
 
@@ -217,6 +218,34 @@ fun GalleryHeader(
                 }
             },
         )
+    }
+}
+
+/**
+ * The same title block for the sections that are not the library.
+ *
+ * They share the library's typography deliberately: four screens that each invented their
+ * own heading would read as four apps stitched together, and the whole point of the nav bar
+ * is that they are one place seen four ways.
+ */
+@Composable
+fun SectionHeader(title: String, subtitle: String, onOpenSettings: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.headlineMedium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        HeaderAction(Icons.Rounded.Settings, "Settings", onOpenSettings)
     }
 }
 

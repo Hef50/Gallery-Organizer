@@ -8,6 +8,7 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
 import com.galleryorganizer.data.db.entity.TagEntity
+import com.galleryorganizer.data.db.entity.TagKind
 import kotlinx.coroutines.flow.Flow
 
 /** A tag plus how many items currently carry it. */
@@ -16,6 +17,7 @@ data class TagWithCount(
     val name: String,
     @androidx.room.ColumnInfo(name = "parent_id") val parentId: Long,
     val color: Int?,
+    val kind: TagKind,
     @androidx.room.ColumnInfo(name = "item_count") val itemCount: Int,
 )
 
@@ -60,7 +62,7 @@ interface TagDao {
      */
     @Query(
         """
-        SELECT t.id, t.name, t.parent_id, t.color, COALESCE(c.n, 0) AS item_count
+        SELECT t.id, t.name, t.parent_id, t.color, t.kind, COALESCE(c.n, 0) AS item_count
         FROM tag t
         LEFT JOIN (
             SELECT mt.tag_id AS tag_id, COUNT(*) AS n
@@ -134,6 +136,14 @@ interface TagDao {
 
     @Query("SELECT COUNT(*) FROM tag")
     suspend fun count(): Int
+
+    /**
+     * Re-kinds a whole branch. Kind is a property of what a tag *names*, and the children of
+     * "People" are people, so changing a parent's kind and leaving `People/Anna` filed under
+     * "Other" would be a bug rather than a choice.
+     */
+    @Query("UPDATE tag SET kind = :kind WHERE id IN (:ids)")
+    suspend fun setKind(ids: List<Long>, kind: TagKind)
 }
 
 data class TagPathNode(

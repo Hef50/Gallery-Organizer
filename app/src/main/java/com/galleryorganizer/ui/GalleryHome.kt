@@ -2,57 +2,54 @@ package com.galleryorganizer.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Sell
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.activity.compose.BackHandler
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
 import com.galleryorganizer.data.db.entity.MediaEntity
 import com.galleryorganizer.ui.grid.GalleryScreen
 import com.galleryorganizer.ui.grid.GalleryViewModel
 import com.galleryorganizer.ui.tags.TagViewModel
+import com.galleryorganizer.ui.theme.Motion
 import com.galleryorganizer.ui.viewer.PhotoViewer
 import com.galleryorganizer.work.IndexingStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
- * Grid and viewer, sharing one transition scope.
+ * The app's content and the full-screen viewer, sharing one transition scope.
  *
  * They live in a single [AnimatedContent] rather than as two navigation destinations
  * because that is what lets the tapped thumbnail *become* the full-screen photo. Routing
  * the viewer through the nav graph would work, but the shared element then has to survive
  * a destination change, and back-stack restoration during the transition makes it flicker.
  * One state flip, one transition, no flicker.
+ *
+ * It wraps the *whole* shell rather than just the grid so that an album or a map cluster can
+ * open the viewer too, with the same hero transition, without each screen hosting its own
+ * copy of it.
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-fun GalleryHome(
+fun ViewerHost(
     galleryViewModel: GalleryViewModel,
     tagViewModel: TagViewModel,
-    indexing: IndexingStatus,
-    snackbarHostState: SnackbarHostState,
-    banner: @Composable () -> Unit,
-    header: @Composable () -> Unit,
-    selectionActions: @Composable (Set<Long>) -> Unit,
     onTagOne: (MediaEntity) -> Unit,
+    content: @Composable (SharedTransitionScope, AnimatedVisibilityScope) -> Unit,
 ) {
     val context = LocalContext.current
     val viewerRequest by galleryViewModel.viewer.collectAsStateWithLifecycle()
@@ -63,24 +60,13 @@ fun GalleryHome(
             transitionSpec = {
                 // The photo itself carries the motion via the shared element, so the rest
                 // of each screen only needs to get out of the way.
-                fadeIn(com.galleryorganizer.ui.theme.Motion.effects()) togetherWith
-                    fadeOut(com.galleryorganizer.ui.theme.Motion.effects())
+                fadeIn(Motion.effects()) togetherWith fadeOut(Motion.effects())
             },
             contentKey = { it?.mediaId },
-            label = "gridToViewer",
+            label = "contentToViewer",
         ) { request ->
             if (request == null) {
-                GalleryScreen(
-                    viewModel = galleryViewModel,
-                    indexing = indexing,
-                    sharedScope = this@SharedTransitionLayout,
-                    animatedScope = this@AnimatedContent,
-                    snackbarHostState = snackbarHostState,
-                    banner = banner,
-                    header = header,
-                    onOpen = { media, index -> galleryViewModel.openViewer(media.id, index) },
-                    selectionActions = selectionActions,
-                )
+                content(this@SharedTransitionLayout, this@AnimatedContent)
             } else {
                 val viewerEntries = galleryViewModel.viewerEntries.collectAsLazyPagingItems()
                 val tagCache = remember { MutableStateFlow<Map<Long, List<String>>>(emptyMap()) }
@@ -112,6 +98,32 @@ fun GalleryHome(
             }
         }
     }
+}
+
+/** The library grid, wired into the transition scopes [ViewerHost] provides. */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun GalleryHome(
+    galleryViewModel: GalleryViewModel,
+    indexing: IndexingStatus,
+    sharedScope: SharedTransitionScope,
+    animatedScope: AnimatedVisibilityScope,
+    banner: @Composable () -> Unit,
+    header: @Composable () -> Unit,
+    selectionActions: @Composable (Set<Long>) -> Unit,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+) {
+    GalleryScreen(
+        viewModel = galleryViewModel,
+        indexing = indexing,
+        sharedScope = sharedScope,
+        animatedScope = animatedScope,
+        banner = banner,
+        header = header,
+        onOpen = { media, index -> galleryViewModel.openViewer(media.id, index) },
+        selectionActions = selectionActions,
+        contentPadding = contentPadding,
+    )
 }
 
 /**

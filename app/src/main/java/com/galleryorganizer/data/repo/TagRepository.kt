@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import com.galleryorganizer.data.db.AppDatabase
 import com.galleryorganizer.data.db.entity.MediaTagCrossRef
 import com.galleryorganizer.data.db.entity.TagEntity
+import com.galleryorganizer.data.db.entity.TagKind
 import com.galleryorganizer.data.db.entity.TagSource
 import com.galleryorganizer.domain.model.TagNode
 import com.galleryorganizer.domain.model.buildTagTree
@@ -47,13 +48,30 @@ class TagRepository(
      * Idempotent on purpose: the bulk sheet's "create and apply" is one gesture and must
      * not fail because the user typed a name that already exists.
      */
-    suspend fun ensureTag(name: String, parentId: Long = TagEntity.ROOT_PARENT_ID): Long {
+    suspend fun ensureTag(
+        name: String,
+        parentId: Long = TagEntity.ROOT_PARENT_ID,
+        kind: TagKind? = null,
+    ): Long {
         val clean = name.trim()
         require(clean.isNotEmpty()) { "A tag needs a name" }
         return db.withTransaction {
-            tagDao.byNameUnder(parentId, clean)?.id
-                ?: tagDao.insert(TagEntity(name = clean, parentId = parentId))
+            tagDao.byNameUnder(parentId, clean)?.id ?: run {
+                // A new child defaults to its parent's kind: someone adding "Kyoto" under
+                // "Japan" means another place, and asking them to say so again is friction
+                // for no information.
+                val resolved = kind
+                    ?: parentId.takeIf { it != TagEntity.ROOT_PARENT_ID }
+                        ?.let { tagDao.byId(it)?.kind }
+                    ?: TagKind.Note
+                tagDao.insert(TagEntity(name = clean, parentId = parentId, kind = resolved))
+            }
         }
+    }
+
+    /** Re-kinds a tag and everything under it. See [com.galleryorganizer.data.db.dao.TagDao.setKind]. */
+    suspend fun setKind(tagId: Long, kind: TagKind) = db.withTransaction {
+        tagDao.setKind(tagDao.subtreeIds(tagId), kind)
     }
 
     /** `Travel/Japan/Kyoto` — creates any missing level and returns the leaf's id. */

@@ -49,7 +49,7 @@ models, which are bundled precisely so the app never needs the network.
 
 ---
 
-## 2. Smoke test — seven steps, about ten minutes
+## 2. Smoke test — eleven steps, about fifteen minutes
 
 Do these in order on the real library. Each one exercises a whole phase.
 
@@ -62,9 +62,18 @@ Do these in order on the real library. Each one exercises a whole phase.
 | 5 | Long-press a photo, drag across several rows without lifting | Selection follows the finger; count in the toolbar climbs; drag *back* deselects |
 | 6 | Tap the tag icon → type a name → **Create "…" and apply** | Snackbar: "Tagged N items · name", with **Undo** |
 | 7 | Type that tag name into the search box | Exactly those items come back |
+| 8 | Pinch the grid apart, then together | Column count steps 4 → 2 → 1 and 4 → 6 → 10, springing rather than snapping; the photo under your fingers stays put |
+| 9 | Tap a photo | It grows out of its tile into full screen; swipe sideways for the next; drag down to dismiss back into the same tile |
+| 10 | Select a few photos → album icon → type a name → **Create "…" and add** | Snackbar with **Undo**; the album appears on the **Albums** tab with one of those photos as its cover |
+| 11 | Open **Places** | A plot of where your photos were taken, with clusters. Tap one → **Name this place** → a Place tag lands on everything in it |
 
-If all seven pass, indexing, paging, selection, tagging, FTS and the permission flow are all
-working end to end.
+If all eleven pass, indexing, paging, selection, tagging, FTS, the permission flow, the
+viewer transition, albums and the EXIF location pass are all working end to end.
+
+Step 11 needs `ACCESS_MEDIA_LOCATION` (granted in the same dialog as step 2) and needs the
+location worker to have run — it starts three minutes after launch and works through the
+library in the background, so on a large library it fills in over an hour or two rather than
+at once. The screen says how many photos it has still to check.
 
 ---
 
@@ -128,6 +137,17 @@ This is worth doing deliberately, because it is the only protection your tags ha
 Restore matches on content first, then filename and size. Step 5 matters: restoring
 *before* indexing finishes will report unmatched items, which is correct behaviour and why
 the dialog tells you to wait and try again.
+
+### Albums keep their order across a reinstall
+Make an album, drag its photos into a deliberate order, export a backup from Settings, clear
+app data, reindex, and restore. The album should come back with the same photos in the same
+order and the same cover. This is the one thing about albums that cannot be regenerated, so
+it is the one worth checking.
+
+### Places without a location permission
+Deny `ACCESS_MEDIA_LOCATION` (Settings → Apps → Gallery Organizer → Permissions). Everything
+else must keep working exactly as before, and Places must say that no photo carries a
+location rather than showing an error or an empty map.
 
 ### Partial access (Android 14+)
 
@@ -197,7 +217,7 @@ only the app's own database.
 ## 6. Running the tests
 
 ```bash
-./gradlew testDebugUnitTest   # 223 tests, JVM only, no device needed
+./gradlew testDebugUnitTest   # 248 tests, JVM only, no device needed
 ./gradlew lintDebug           # must be clean
 ```
 
