@@ -12,14 +12,29 @@ plugins {
  * The debug keystore is committed (base64) so that every debug APK — built locally or on
  * any CI runner — is signed with the same key and installs over the previous build
  * instead of failing with INSTALL_FAILED_UPDATE_INCOMPATIBLE. See DECISIONS.md.
+ *
+ * Decoded by a *task* rather than at configure time: configure-time decoding writes the
+ * file before `clean` runs, so `./gradlew clean assembleDebug` in one invocation deletes
+ * it again and fails at `validateSigningDebug`. Wiring it to `preBuild` means it is always
+ * recreated after a clean, and the up-to-date check keeps it free on repeat builds.
  */
-val debugKeystore: File = layout.buildDirectory.file("debug.keystore").get().asFile.also { out ->
-    val encoded = rootProject.file("keystore/debug.keystore.base64")
-    if (encoded.exists()) {
-        out.parentFile.mkdirs()
-        out.writeBytes(Base64.getDecoder().decode(encoded.readText().filterNot { it.isWhitespace() }))
+val debugKeystoreSource = rootProject.file("keystore/debug.keystore.base64")
+val debugKeystoreFile: File = layout.buildDirectory.file("keystore/debug.keystore").get().asFile
+
+val prepareDebugKeystore = tasks.register("prepareDebugKeystore") {
+    description = "Decodes the committed debug keystore so debug builds are stably signed."
+    onlyIf { debugKeystoreSource.exists() }
+    inputs.file(debugKeystoreSource).withPathSensitivity(PathSensitivity.RELATIVE)
+    outputs.file(debugKeystoreFile)
+    doLast {
+        debugKeystoreFile.parentFile.mkdirs()
+        debugKeystoreFile.writeBytes(
+            Base64.getDecoder().decode(debugKeystoreSource.readText().filterNot { it.isWhitespace() }),
+        )
     }
 }
+
+tasks.named("preBuild") { dependsOn(prepareDebugKeystore) }
 
 android {
     namespace = "com.galleryorganizer"
@@ -51,8 +66,10 @@ android {
 
     signingConfigs {
         getByName("debug") {
-            if (debugKeystore.exists()) {
-                storeFile = debugKeystore
+            if (debugKeystoreSource.exists()) {
+                // The file itself may not exist yet at configure time; prepareDebugKeystore
+                // creates it before anything needs to sign with it.
+                storeFile = debugKeystoreFile
                 storePassword = "android"
                 keyAlias = "androiddebugkey"
                 keyPassword = "android"

@@ -28,10 +28,15 @@ the `RELEASE` MediaStore write-request helpers.
 ### Committed debug keystore
 `keystore/debug.keystore.base64` is a base64 dump of a throwaway debug keystore with
 the standard `androiddebugkey` / `android` credentials. `app/build.gradle.kts` decodes
-it into `build/` at configure time and wires it as the `debug` signing config. Without
-this, CI would generate a fresh random keystore per runner and every downloaded APK
-would refuse to install over the previous one (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
-This key is worthless — it signs debug builds only and is deliberately public.
+it into `build/` and wires it as the `debug` signing config. Without this, CI would
+generate a fresh random keystore per runner and every downloaded APK would refuse to
+install over the previous one (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`). This key is
+worthless — it signs debug builds only and is deliberately public.
+
+The decoding is a *task* wired to `preBuild`, not configure-time code. Configure-time
+decoding writes the file before `clean` runs, so `./gradlew clean assembleDebug` in a
+single invocation deletes it again and fails at `validateSigningDebug` — which is
+exactly what a fresh CI checkout looks like if the two are ever combined.
 
 ### One branch, phase-by-phase commits, one PR
 The session is pinned to the branch `claude/android-photo-organizer-slemb0` and may not
