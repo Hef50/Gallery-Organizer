@@ -8,6 +8,7 @@ import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import androidx.sqlite.db.SimpleSQLiteQuery
+import com.galleryorganizer.data.db.entity.MediaEntity
 import com.galleryorganizer.data.repo.SavedSearch
 import com.galleryorganizer.di.AppContainer
 import com.galleryorganizer.domain.search.SearchQuery
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -63,7 +65,8 @@ class GalleryViewModel(
         // baked into a saved search — hiding a folder is a view preference, not part of
         // what the user asked for.
         .combine(container.settings.hiddenBucketIds) { query, hidden ->
-            query.copy(excludedBucketIds = hidden.toList())
+            hiddenBuckets = hidden.toList()
+            query.copy(excludedBucketIds = hiddenBuckets)
         }
         .distinctUntilChanged()
 
@@ -145,6 +148,55 @@ class GalleryViewModel(
         viewModelScope.launch { search.setPinned(id, pinned) }
     }
 
+    // --- Viewer -------------------------------------------------------------------------
+
+    private val _viewer = MutableStateFlow<ViewerRequest?>(null)
+    val viewer: StateFlow<ViewerRequest?> = _viewer.asStateFlow()
+
+    /**
+     * The viewer's own paged stream: the same query, without date headers.
+     *
+     * A second Pager rather than reusing the grid's, because the grid's stream has header
+     * rows spliced into it and swiping onto one would land on a blank page. `initialKey`
+     * is what makes opening the 40,000th photo instant — Room's paging source keys on
+     * offset, so the first load is the page around that item rather than page zero
+     * followed by a very long scroll.
+     */
+    val viewerEntries: Flow<PagingData<MediaEntity>> = _viewer
+        .filterNotNull()
+        .flatMapLatest { request ->
+            val statement = search.statementFor(_query.value.copy(excludedBucketIds = hiddenBuckets))
+            Pager(
+                config = PagingConfig(
+                    pageSize = VIEWER_PAGE_SIZE,
+                    prefetchDistance = VIEWER_PAGE_SIZE,
+                    initialLoadSize = VIEWER_PAGE_SIZE,
+                    enablePlaceholders = false,
+                ),
+                initialKey = request.mediaIndex,
+                pagingSourceFactory = {
+                    container.database.mediaDao().pagingSourceRaw(
+                        SimpleSQLiteQuery(statement.sql, statement.args.toTypedArray()),
+                    )
+                },
+            ).flow
+        }
+        .cachedIn(viewModelScope)
+
+    private var hiddenBuckets: List<Long> = emptyList()
+
+    /**
+     * @param mediaIndex position among *photos only*, which is the grid index minus the
+     *   date headers before it. The viewer's pager has no headers, so this is the page.
+     */
+    fun openViewer(mediaId: Long, mediaIndex: Int) {
+        _viewer.value = ViewerRequest(mediaId, mediaIndex)
+    }
+
+    fun closeViewer() {
+        _viewer.value = null
+    }
+
     /** The quick-filter chips above the grid. */
     fun applyQuickFilter(filter: QuickFilter) {
         _activeSavedSearch.value = null
@@ -189,6 +241,7 @@ class GalleryViewModel(
 
     companion object {
         const val PAGE_SIZE = 120
+        const val VIEWER_PAGE_SIZE = 12
         const val SEARCH_DEBOUNCE_MS = 250L
 
         private val HEADER_FORMAT: DateTimeFormatter =
@@ -198,3 +251,6 @@ class GalleryViewModel(
             get() = this == SortOrder.NewestFirst || this == SortOrder.OldestFirst
     }
 }
+
+/** Which photo the viewer opened on, and where it sits in the current result. */
+data class ViewerRequest(val mediaId: Long, val mediaIndex: Int)

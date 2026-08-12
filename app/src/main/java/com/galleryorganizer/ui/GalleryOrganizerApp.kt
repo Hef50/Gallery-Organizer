@@ -1,10 +1,7 @@
 package com.galleryorganizer.ui
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Sell
-import androidx.compose.foundation.layout.Column
+import androidx.compose.material.icons.rounded.Sell
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.SnackbarHostState
@@ -25,18 +22,15 @@ import androidx.navigation.compose.rememberNavController
 import com.galleryorganizer.di.AppContainer
 import com.galleryorganizer.permissions.MediaAccess
 import com.galleryorganizer.permissions.MediaPermissionState
-import com.galleryorganizer.ui.grid.GalleryScreen
 import com.galleryorganizer.ui.duplicates.DuplicatesScreen
 import com.galleryorganizer.ui.duplicates.DuplicatesViewModel
 import com.galleryorganizer.ui.grid.GalleryViewModel
-import com.galleryorganizer.ui.grid.QuickFilterRow
 import com.galleryorganizer.ui.permissions.MediaPermissionScreen
 import com.galleryorganizer.ui.permissions.PartialAccessBanner
 import com.galleryorganizer.ui.permissions.rememberMediaPermissionController
 import com.galleryorganizer.ui.permissions.rememberMediaPermissionState
 import com.galleryorganizer.ui.search.FilterSheet
-import com.galleryorganizer.ui.search.GallerySearchBar
-import com.galleryorganizer.ui.search.SavedSearchRow
+import com.galleryorganizer.ui.search.GalleryHeader
 import com.galleryorganizer.ui.settings.FoldersScreen
 import com.galleryorganizer.ui.settings.SettingsScreen
 import com.galleryorganizer.ui.settings.SettingsViewModel
@@ -65,8 +59,6 @@ fun GalleryOrganizerApp() {
     val scope = rememberCoroutineScope()
 
     val liveState by rememberMediaPermissionState()
-    // The launcher result is authoritative the instant the dialog closes; the lifecycle
-    // observer only catches changes made outside the app.
     var overrideState by remember { mutableStateOf<MediaPermissionState?>(null) }
     val permissions = overrideState ?: liveState
 
@@ -91,8 +83,6 @@ fun GalleryOrganizerApp() {
         return
     }
 
-    // A catch-up pass, not a rescan: the indexer only reads past its watermark, so on a
-    // quiet day this reads a handful of rows.
     LaunchedEffect(permissions.access) {
         WorkScheduler.enqueueIndex(context)
         WorkScheduler.enqueuePeriodicIndex(context)
@@ -109,22 +99,19 @@ fun GalleryOrganizerApp() {
             val selection by galleryViewModel.selection.collectAsStateWithLifecycle()
             val lastAction by tagViewModel.lastAction.collectAsStateWithLifecycle()
             val snackbarHostState = remember { SnackbarHostState() }
-            var sheetOpen by remember { mutableStateOf(false) }
+            var tagSheetFor by remember { mutableStateOf<Set<Long>?>(null) }
             var filtersOpen by remember { mutableStateOf(false) }
             val query by galleryViewModel.query.collectAsStateWithLifecycle()
             val saved by galleryViewModel.savedSearches.collectAsStateWithLifecycle()
             val activeSaved by galleryViewModel.activeSavedSearch.collectAsStateWithLifecycle()
             val buckets by galleryViewModel.buckets.collectAsStateWithLifecycle()
+            val total by galleryViewModel.itemCount.collectAsStateWithLifecycle()
 
             LaunchedEffect(lastAction) {
                 val action = lastAction ?: return@LaunchedEffect
                 val verb = if (action.wasApplied) "Tagged" else "Removed"
                 val result = snackbarHostState.showSnackbar(
-                    message = "$verb %,d item%s · %s".format(
-                        action.mediaIds.size,
-                        if (action.mediaIds.size == 1) "" else "s",
-                        action.tagName,
-                    ),
+                    message = "$verb %,d · %s".format(action.mediaIds.size, action.tagName),
                     actionLabel = "Undo",
                     withDismissAction = true,
                 )
@@ -135,8 +122,9 @@ fun GalleryOrganizerApp() {
                 }
             }
 
-            GalleryScreen(
-                viewModel = galleryViewModel,
+            GalleryHome(
+                galleryViewModel = galleryViewModel,
+                tagViewModel = tagViewModel,
                 indexing = indexing,
                 snackbarHostState = snackbarHostState,
                 banner = {
@@ -152,51 +140,30 @@ fun GalleryOrganizerApp() {
                         )
                     }
                 },
-                searchBar = {
-                    Column {
-                        GallerySearchBar(
-                            query = query,
-                            onTextChange = galleryViewModel::setText,
-                            onOpenFilters = { filtersOpen = true },
-                        )
-                        QuickFilterRow(
-                            query = query,
-                            onSelect = galleryViewModel::applyQuickFilter,
-                        )
-                        SavedSearchRow(
-                            saved = saved,
-                            activeId = activeSaved?.id,
-                            canSave = !query.isEmpty && activeSaved == null,
-                            onOpen = galleryViewModel::openSavedSearch,
-                            onSave = galleryViewModel::saveCurrentSearch,
-                            onTogglePin = {
-                                galleryViewModel.setSavedSearchPinned(it.id, !it.pinned)
-                            },
-                            onDelete = { galleryViewModel.deleteSavedSearch(it.id) },
-                        )
+                header = {
+                    GalleryHeader(
+                        query = query,
+                        total = total,
+                        savedSearches = saved,
+                        activeSavedId = activeSaved?.id,
+                        onTextChange = galleryViewModel::setText,
+                        onOpenFilters = { filtersOpen = true },
+                        onQuickFilter = galleryViewModel::applyQuickFilter,
+                        onOpenSaved = galleryViewModel::openSavedSearch,
+                        onSaveSearch = galleryViewModel::saveCurrentSearch,
+                        onDeleteSaved = { galleryViewModel.deleteSavedSearch(it.id) },
+                        onTogglePin = { galleryViewModel.setSavedSearchPinned(it.id, !it.pinned) },
+                        onSelectAll = galleryViewModel::selectAllResults,
+                        onOpenTags = { navController.navigate(Routes.TAGS) },
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                    )
+                },
+                selectionActions = { selected ->
+                    IconButton(onClick = { tagSheetFor = selected }) {
+                        Icon(Icons.Rounded.Sell, contentDescription = "Tag selected items")
                     }
                 },
-                selectionActions = {
-                    IconButton(onClick = { sheetOpen = true }) {
-                        Icon(Icons.Filled.Sell, contentDescription = "Tag selected items")
-                    }
-                },
-                topBarActions = {
-                    if (!query.isEmpty) {
-                        IconButton(onClick = galleryViewModel::selectAllResults) {
-                            Icon(
-                                Icons.Filled.SelectAll,
-                                contentDescription = "Select all results",
-                            )
-                        }
-                    }
-                    IconButton(onClick = { navController.navigate(Routes.TAGS) }) {
-                        Icon(Icons.Filled.Sell, contentDescription = "Manage tags")
-                    }
-                    IconButton(onClick = { navController.navigate(Routes.SETTINGS) }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
-                    }
-                },
+                onTagOne = { media -> tagSheetFor = setOf(media.id) },
             )
 
             if (filtersOpen) {
@@ -209,12 +176,19 @@ fun GalleryOrganizerApp() {
                 )
             }
 
-            if (sheetOpen && selection.active) {
-                BulkTagSheet(
-                    selection = selection.selected,
-                    viewModel = tagViewModel,
-                    onDismiss = { sheetOpen = false },
-                )
+            tagSheetFor?.let { target ->
+                if (target.isNotEmpty()) {
+                    BulkTagSheet(
+                        selection = target,
+                        viewModel = tagViewModel,
+                        onDismiss = { tagSheetFor = null },
+                    )
+                }
+            }
+
+            // A selection that empties itself should close the sheet with it.
+            LaunchedEffect(selection.active) {
+                if (!selection.active && tagSheetFor?.size != 1) tagSheetFor = null
             }
         }
 
@@ -234,6 +208,15 @@ fun GalleryOrganizerApp() {
             )
         }
 
+        composable(Routes.SUGGESTIONS) {
+            val suggestionsViewModel: SuggestionsViewModel =
+                viewModel(factory = SuggestionsViewModel.Factory(container))
+            SuggestionsScreen(
+                viewModel = suggestionsViewModel,
+                onBack = { navController.popBackStack() },
+            )
+        }
+
         composable(Routes.DUPLICATES) {
             val duplicatesViewModel: DuplicatesViewModel =
                 viewModel(factory = DuplicatesViewModel.Factory(container))
@@ -249,15 +232,6 @@ fun GalleryOrganizerApp() {
                 buckets = buckets,
                 hiddenIds = container.settings.hiddenBucketIds,
                 settings = container.settings,
-                onBack = { navController.popBackStack() },
-            )
-        }
-
-        composable(Routes.SUGGESTIONS) {
-            val suggestionsViewModel: SuggestionsViewModel =
-                viewModel(factory = SuggestionsViewModel.Factory(container))
-            SuggestionsScreen(
-                viewModel = suggestionsViewModel,
                 onBack = { navController.popBackStack() },
             )
         }

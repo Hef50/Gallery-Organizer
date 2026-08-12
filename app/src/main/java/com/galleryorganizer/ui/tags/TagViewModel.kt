@@ -85,6 +85,10 @@ class TagViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** Tag names on one item, for the viewer's details panel. */
+    suspend fun tagNamesFor(mediaId: Long): List<String> =
+        container.database.mediaTagDao().tagsFor(mediaId).map { it.name }
+
     fun undoLast() {
         val action = _lastAction.value ?: return
         viewModelScope.launch {
