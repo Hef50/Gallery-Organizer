@@ -40,9 +40,20 @@ It is built for a 150,000+ item library on a Samsung Galaxy S25 Ultra.
 
 ## Install
 
-Every push builds a signed debug APK. Grab it from the **Actions** tab → latest *Build*
-run → **Artifacts** → `app-debug`. The signing key is committed, so each new build
-installs straight over the previous one.
+**On your phone, open
+<https://github.com/Hef50/Gallery-Organizer/releases/download/latest/app-debug.apk>** and
+tap it. Android will ask you to allow installs from your browser — that is normal for
+anything not from the Play Store, which this deliberately never uses.
+
+The link is stable and rebuilt on every push to `main`. The signing key is committed, so a
+new build installs straight over the old one without uninstalling and without losing your
+tags.
+
+Prefer `adb`? The same APK is on the **Actions** tab → latest *Build* run → **Artifacts** →
+`app-debug`.
+
+See [`TESTING.md`](TESTING.md) for what to check once it is installed — nothing here has
+run on a real device yet.
 
 ## Build
 
