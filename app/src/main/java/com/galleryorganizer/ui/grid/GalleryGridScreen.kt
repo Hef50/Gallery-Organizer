@@ -76,6 +76,9 @@ fun GalleryGrid(
      * Position among photos only. The viewer's pager has no date headers, so opening the
      * grid's index directly would land on the wrong photo — off by one per heading above
      * it, which at the bottom of a year is a lot.
+     *
+     * The walk is bounded by however much Paging is holding, not by how far down the
+     * library the tap was, so its cost does not grow as you scroll.
      */
     fun mediaIndexOf(gridIndex: Int): Int {
         var headers = 0

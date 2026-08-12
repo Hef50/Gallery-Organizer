@@ -49,7 +49,18 @@ class LocationBackfillWorker(
 
     companion object {
         const val RESULT_READ = "read"
-        private const val BATCH = 250
+
+        /**
+         * Rows per transaction, matching the app's ~500-row convention.
+         *
+         * Larger than it needs to be for throughput, and that is the point: every commit to
+         * `media` invalidates the grid's paging source, which makes the grid re-query from
+         * wherever the user is scrolling. Room's invalidation is per table, so there is no
+         * way to say "this write does not change anything the grid shows" — the only lever
+         * is committing less often. At 250 a 150k library interrupted the grid six hundred
+         * times.
+         */
+        private const val BATCH = 500
         private const val MAX_PER_RUN = 6_000
     }
 }

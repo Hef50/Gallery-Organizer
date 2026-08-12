@@ -661,3 +661,66 @@ Material's navigation bar paints an opaque 80 dp band across the bottom of the s
 on a gallery means permanently hiding a row of photographs. The pill floats clear of the
 edge, is only as wide as its contents, lets the grid scroll visibly underneath, and expands
 only the selected item to its label so it stays inside the thumb arc.
+
+---
+
+## Scrolling deep into the library
+
+Reported as "scrolling to old images is slow and lags the app". It turned out to be three
+separate things, and only one of them was where you would look first.
+
+### Coil's disk cache never held a single thumbnail
+The app configured a 256 MB disk cache for thumbnails. In Coil 2, `HttpUriFetcher` is the
+**only** thing that ever writes to the disk cache — a custom `Fetcher` returning a
+`content://` result does not populate it. So the cache was dead configuration, and every
+thumbnail was regenerated from scratch whenever it fell out of the in-memory cache.
+
+That is invisible at the top of the library and brutal further down. `loadThumbnail` is
+nearly free when MediaStore has a cached thumbnail, which it does for recent photos. For a
+photo from four years ago it usually does not, and MediaProvider silently falls back to
+decoding the original — a 200 MP, ~50 MB JPEG on this phone. Scroll down through a few
+thousand old photos and back up and every one was decoded from the original *again*.
+
+`MediaStoreThumbnailFetcher` now writes through to the disk cache itself. MediaProvider is
+asked at most once per photo per size, ever.
+
+### Thumbnail requests are snapped to buckets, and capped
+Two reasons. Cache keys stay stable when a cell measures 350 px in one layout pass and 352
+in the next — otherwise that is two cached thumbnails of the same photo. And the cap is the
+important half: above about a thousand pixels MediaStore has nothing cached and *must*
+decode the original, so the one-column grid — asking for ~1440 px on this screen — was
+decoding a 200 MP original for every visible tile. It is now served a 1024 px thumbnail,
+which is very slightly softer and perhaps fifty times cheaper.
+
+### Sixty-four concurrent decodes starve the main thread
+Coil's fetcher and decoder dispatchers both default to `Dispatchers.IO`, which is up to 64
+threads. A hard fling asks for that many thumbnails at once, and behind an uncached
+thumbnail is a full JPEG decode. Sixty-four of those on eight cores saturates the CPU and
+starves the main thread — felt as *the grid* stuttering, even though none of the work is on
+the main thread. Both dispatchers are now capped at 4. Nothing is lost by queueing: requests
+the fling has already flown past are cancelled before they are ever decoded.
+
+### `maxSize` was making deep scrolling worse, not cheaper
+The grid's `PagingConfig` had `maxSize = pageSize * 10` with `enablePlaceholders = false`.
+That combination does not bound memory so much as break the list: pages dropped from the
+front cancel out pages appended at the back, so the window never grows and every position
+in it slides as you scroll. `GridPagingWindowTest` pins this down — under a cap, position
+400 is not addressable at all.
+
+Two consequences. A long fling became a continuous load-and-drop cycle, re-querying photos
+it had just discarded. And the index the grid hands the viewer stopped being an offset into
+the query, so past a certain depth **tapping a photo opened a different photo**. That was a
+correctness bug found while chasing the performance one.
+
+The cap is gone. The cost is memory — a row is a few hundred bytes, so flinging through a
+whole 150k library in one uninterrupted sitting would hold tens of megabytes, and any write
+to the library invalidates the source and releases it. Bounding it properly means turning
+placeholders on, which trades away the `insertSeparators` date headers; that is written up
+in `OPEN_QUESTIONS.md` rather than decided here.
+
+### The location worker was interrupting the grid every 250 rows
+Every commit to `media` invalidates the grid's paging source, and Room's invalidation is
+per table — there is no way to say "this write does not change anything the grid shows". The
+EXIF backfill added in P12 committed every 250 rows, so a 150k library would interrupt the
+grid six hundred times while it ran. The only lever is committing less often, so it now uses
+the app's standard ~500-row transaction.

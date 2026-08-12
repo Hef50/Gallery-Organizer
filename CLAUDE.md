@@ -123,7 +123,7 @@ geocoding, and the map draws no tiles. See `DECISIONS.md`.
 ## Build commands
 
 ```bash
-./gradlew testDebugUnitTest     # 248 JVM unit tests — must always pass
+./gradlew testDebugUnitTest     # 257 JVM unit tests — must always pass
 ./gradlew lintDebug             # must be clean; CI fails on any lint error
 ./gradlew assembleDebug         # app/build/outputs/apk/debug/app-debug.apk (~95 MB, arm64)
 ```

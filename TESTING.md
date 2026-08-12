@@ -98,6 +98,17 @@ These are the things the JVM tests assert but only a device can really confirm.
 4. **Expect:** it continues from roughly where it stopped rather than starting over. The
    count should not drop back to zero.
 
+### Scrolling deep into the library
+The thing most likely to feel slow, and the thing most recently fixed. Fling right down to
+your oldest photos, then fling back up. The first pass over old photos does real work — the
+system has no cached thumbnail for them, so each one is generated once — but it should stay
+smooth, and **the second pass over the same photos must be instant**, because every
+thumbnail is now kept in the app's own cache. If going back over photos you have already
+seen is still slow, that cache is not working and is worth reporting.
+
+Also try it at one column (pinch all the way in). That used to decode a full 200 MP original
+per tile.
+
 ### Scrolling performance at your library's size
 
 The budget is a smooth grid and a cold start under 1.5 s. On a large library, watch for:
@@ -217,7 +228,7 @@ only the app's own database.
 ## 6. Running the tests
 
 ```bash
-./gradlew testDebugUnitTest   # 248 tests, JVM only, no device needed
+./gradlew testDebugUnitTest   # 257 tests, JVM only, no device needed
 ./gradlew lintDebug           # must be clean
 ```
 

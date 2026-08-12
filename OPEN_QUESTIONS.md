@@ -174,3 +174,25 @@ recur.
 
 **Current behaviour:** once per album, at the position where it was first added; adding it
 again is a no-op rather than a silent reorder.
+
+---
+
+### 13. Should the grid use placeholders, and lose its date headers?
+
+The grid pages with `enablePlaceholders = false` and no `maxSize`, so the loaded window
+grows as you scroll and is only released when something writes to the library. Flinging
+through an entire 150k library in one sitting would hold tens of megabytes.
+
+Turning placeholders on would bound that and make the grid instantly scrollable to any
+depth, because it would know its own full length up front. The cost is real: date headers
+are spliced in with `PagingData.insertSeparators`, which compares each item with its
+neighbour, and a placeholder has no date — so headers would appear and disappear at every
+unloaded boundary as pages arrived.
+
+The alternatives are a date scrubber down the edge that jumps by month (what Samsung
+Gallery and Google Photos both do, and which solves "get me to 2019" far better than any
+amount of flinging), or computing sections from a separate cheap `GROUP BY` over dates
+instead of from the paged stream.
+
+**Current behaviour:** unbounded window, real date headers, no scrubber. This wants a device
+with a genuinely large library to decide on.

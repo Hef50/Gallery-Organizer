@@ -93,7 +93,27 @@ class GalleryViewModel(
                     prefetchDistance = PAGE_SIZE,
                     initialLoadSize = PAGE_SIZE * 2,
                     enablePlaceholders = false,
-                    maxSize = PAGE_SIZE * 10,
+                    /*
+                     * Deliberately unbounded — there was a `maxSize` here and it did real
+                     * damage, which `GridPagingWindowTest` now pins down.
+                     *
+                     * With placeholders off, a cap does not simply bound memory: pages
+                     * dropped from the front cancel out pages appended at the back, so the
+                     * list never grows and every position in it slides as you scroll. Two
+                     * things followed. A long fling turned into a continuous load-and-drop
+                     * cycle, re-querying photos it had just discarded, which is the deep
+                     * scrolling that felt worst. And the index the grid handed the viewer
+                     * stopped being an offset into the query, so once you had scrolled far
+                     * enough, tapping a photo opened a different one.
+                     *
+                     * The cost of dropping the cap is memory: a row is a few hundred bytes,
+                     * so flinging through the whole of a 150k library in one uninterrupted
+                     * sitting would hold tens of megabytes. Any write to the library
+                     * invalidates the source and releases it again, and the realistic case
+                     * is a few thousand rows. Bounding this properly means turning
+                     * placeholders on, which trades away the date headers — see
+                     * OPEN_QUESTIONS.md.
+                     */
                 ),
                 pagingSourceFactory = {
                     container.database.mediaDao().pagingSourceRaw(
