@@ -1,0 +1,83 @@
+name: Release APK
+
+# Publishes the debug APK as a GitHub Release asset, which gives it a stable, direct
+# download URL that works in a phone browser:
+#
+#   https://github.com/Hef50/Gallery-Organizer/releases/download/latest/app-debug.apk
+#
+# Actions *artifacts* are ZIPs behind a login — you cannot install one from a phone
+# without a laptop in the middle. A release asset is a plain .apk tap-to-install.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+jobs:
+  release:
+    name: Build and publish APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The release is only worth publishing if the tests pass, so this job does not
+      # depend on the other workflow having run — it checks for itself.
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Assemble debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Name the APK by commit
+        id: naming
+        run: |
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          echo "sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          cp app/build/outputs/apk/debug/app-debug.apk "gallery-organizer-$SHORT_SHA.apk"
+          # A stable filename as well, so the download URL never changes.
+          cp app/build/outputs/apk/debug/app-debug.apk app-debug.apk
+
+      - name: Publish to the rolling "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          NOTES="Debug build of \`${{ github.ref_name }}\` at \`${{ steps.naming.outputs.sha }}\`.
+
+          Tap **app-debug.apk** below on your phone to install. Signed with the committed
+          debug key, so it installs straight over any previous build without uninstalling.
+
+          Built $(date -u '+%Y-%m-%d %H:%M UTC') from ${{ github.sha }}."
+
+          # Recreating the release keeps the download URL stable while replacing the asset.
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest \
+            --title "Latest build" \
+            --notes "$NOTES" \
+            --prerelease \
+            --target "${{ github.sha }}" \
+            app-debug.apk "gallery-organizer-${{ steps.naming.outputs.sha }}.apk"
+
+      - name: Where to get it
+        run: |
+          echo "### APK published" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Install on your phone from:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "<${{ github.server_url }}/${{ github.repository }}/releases/download/latest/app-debug.apk>" >> "$GITHUB_STEP_SUMMARY"

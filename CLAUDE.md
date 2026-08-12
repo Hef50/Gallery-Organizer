@@ -56,17 +56,30 @@ and reconcile it on every index pass.
 ## Schema (extend as needed; document changes)
 
 ```
-media(id, content_hash UNIQUE, mediastore_id, uri, display_name, relative_path,
+media(id, content_hash, mediastore_id, uri, display_name, relative_path,
       bucket_id, mime, size, date_taken, date_modified, duration, width, height,
-      is_missing)
-tag(id, name, parent_id, color)          -- hierarchical
+      is_missing, latitude, longitude, location_state)
+tag(id, name, parent_id, color, kind)    -- hierarchical; kind: person|place|event|thing|note
 media_tag(media_id, tag_id, source)      -- source: manual | auto | imported
+album(id, name, description, cover_media_id, sort_order)
+album_media(album_id, media_id, position)  -- position is the user's own order
 saved_search(id, name, query_json)
 index_state(key, value)
 media_fts(...)                           -- FTS over name, tags, ocr_text
 ```
 
+`content_hash` is indexed but **not unique**, a deliberate deviation from the brief's sketch:
+a unique index would make the second copy of a duplicated file un-insertable and P10's
+duplicate finder impossible. See `DECISIONS.md`.
+
+Three separate things group photos and none collapses into another: a **tag** describes,
+an **album** is an ordered hand-made sequence, a **saved search** is a standing question.
+
 ## Phases — each independently shippable
+
+All ten are implemented, one commit per phase on
+`claude/android-photo-organizer-slemb0`. The branch requirement means one PR rather than
+one per phase; the phase boundaries live in the commit history (see `DECISIONS.md`).
 
 | Phase | Scope |
 |---|---|
@@ -81,12 +94,28 @@ media_fts(...)                           -- FTS over name, tags, ocr_text
 | P8  | XMP write-back (best effort): `dc:subject` for JPEG/PNG/HEIC, sidecar `.xmp` otherwise (incl. video). DB stays authoritative. Write temp → verify → replace |
 | P9  | On-device auto-tagging: ML Kit labeling + OCR in an idle worker, `source='auto'`, never overwrites manual tags. User reviews/promotes suggestions |
 | P10 | Polish: dark theme, empty states, duplicate finder via `content_hash`, "recently added", per-folder hiding |
+| P11 | Redesign: spring motion vocabulary, pinch-to-zoom grid density, shared-element photo viewer |
+| P12 | Organisation: albums, Places (offline map from EXIF), typed tags, four-section nav |
+
+## Permissions
+
+`READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`, `READ_MEDIA_VISUAL_USER_SELECTED` (Android 14+),
+`POST_NOTIFICATIONS`, and `ACCESS_MEDIA_LOCATION`. The last one is what makes the Places
+screen possible — MediaStore redacts GPS from the file it hands an app without it — and is
+requested in the same dialog as the reads. Refusing it costs Places and nothing else.
+
+**Still no `INTERNET`.** Nothing about a coordinate leaves the device, there is no reverse
+geocoding, and the map draws no tiles. See `DECISIONS.md`.
 
 ## Process rules
 
 - Work phase by phase; one commit (or set) per phase, clearly described, never bundled.
 - Every phase ships unit tests that run on the JVM with no device — the sandbox has no
   emulator. `./gradlew testDebugUnitTest` must pass.
+- **Anything that touches the grid, the viewer or a paged list must keep `AppLaunchTest`
+  green.** It starts the real activity and is the only test that sees the empty first frame,
+  which is the state every launch passes through and the one that unit tests of the parts
+  never visit. A crash there is a crash on the user's phone.
 - CI (`.github/workflows/build.yml`) runs unit tests, `assembleDebug`, and uploads
   `app-debug.apk` as an artifact so the phone can install it directly.
 - Append every non-obvious decision and trade-off to `DECISIONS.md`.
@@ -98,10 +127,32 @@ media_fts(...)                           -- FTS over name, tags, ocr_text
 ## Build commands
 
 ```bash
-./gradlew testDebugUnitTest     # JVM unit tests — must always pass
-./gradlew assembleDebug         # produces app/build/outputs/apk/debug/app-debug.apk
-./gradlew lint
+./gradlew testDebugUnitTest     # 297 JVM unit tests — must always pass
+./gradlew lintDebug             # must be clean; CI fails on any lint error
+./gradlew assembleDebug         # app/build/outputs/apk/debug/app-debug.apk (~95 MB, arm64)
 ```
+
+Needs JDK 17+ and an Android SDK with platform 35 (`ANDROID_HOME`, or `sdk.dir` in
+`local.properties`).
+
+## Schema versions
+
+- **v1** — initial schema.
+- **v2** — `index_media_size_display_name`, so restore can match an item that was tagged
+  before it was ever hashed without a full table scan per backed-up item.
+- **v3** — `label_suggestion` and `media.auto_scan_state` for on-device suggestions.
+- **v4** — replaced the single-column `is_missing` / `is_video` / `bucket_id` indices with
+  `(is_missing, date_taken, id)` and `(bucket_id, date_taken)`. `QueryPlanTest` caught
+  SQLite choosing the two-value `is_missing` index for the grid and then sorting the entire
+  result in a temp B-tree; the composites carry the sort so `LIMIT` stops early.
+- **v5** — organisation: `album` + `album_media` (with an explicit sparse `position`),
+  `tag.kind`, and `media.latitude` / `longitude` / `location_state` plus their indices.
+  Backup format version 2 carries albums and tag kinds; the format string is unchanged and
+  every new field is defaulted, so v1 files still restore completely.
+
+Every migration has a test in `MigrationTest` that rebuilds the old schema from Room's
+committed exported JSON, writes representative rows, migrates, and asserts nothing was
+lost. Never add `fallbackToDestructiveMigration`.
 
 The debug keystore lives at `keystore/debug.keystore.base64`; `app/build.gradle.kts`
 decodes it at configure time so every debug APK — local or CI — is signed with the
