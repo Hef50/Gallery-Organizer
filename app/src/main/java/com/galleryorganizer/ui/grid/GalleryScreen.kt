@@ -34,8 +34,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -46,6 +50,7 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import com.galleryorganizer.data.db.entity.MediaEntity
 import com.galleryorganizer.ui.theme.Motion
 import com.galleryorganizer.work.IndexingStatus
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -68,6 +73,44 @@ fun GalleryScreen(
 
     val gridState = rememberLazyGridState()
     val zoomState = rememberGridZoomState()
+    val scrubber by viewModel.scrubber.collectAsStateWithLifecycle()
+    val jumps by viewModel.jumps.collectAsStateWithLifecycle()
+
+    /*
+     * Where the slider's thumb belongs, taken from the *date* of the topmost visible photo
+     * rather than from its index. Index would be the obvious choice and would be wrong: the
+     * grid pages without placeholders, so an index in the list is not a position in the
+     * query, and after a jump it is not even close. Every photo carries a date, so this
+     * stays correct however the window was assembled.
+     */
+    val scrubPosition by remember(scrubber) {
+        derivedStateOf {
+            val top = gridState.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: 0
+            val entry = generateSequence(top) { it + 1 }
+                .take(LOOKAHEAD_FOR_DATE)
+                .mapNotNull { entries.peek(it) as? GridEntry.Item }
+                .firstOrNull()
+            entry?.let { scrubber.fractionForDate(it.media.dateTaken) } ?: 0f
+        }
+    }
+
+    // The slider is shown while the grid is moving and for a moment after it stops, so it is
+    // there when it is wanted and gone the rest of the time.
+    var scrubberVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(gridState.isScrollInProgress) {
+        if (gridState.isScrollInProgress) {
+            scrubberVisible = true
+        } else {
+            delay(SCRUBBER_LINGER_MS)
+            scrubberVisible = false
+        }
+    }
+
+    // A jump re-anchors the paging window, so the grid has to go back to the top of it —
+    // otherwise it stays scrolled to wherever the user was in the previous window.
+    LaunchedEffect(jumps) {
+        if (jumps > 0) gridState.scrollToItem(0)
+    }
 
     // No snackbar host here: the shell owns the one snackbar, so an undo raised from an
     // album or the map lands in the same place as one raised from the grid.
@@ -112,6 +155,21 @@ fun GalleryScreen(
                     }
                 }
             }
+
+            DateScrubber(
+                model = scrubber,
+                position = scrubPosition,
+                // Never over a selection: the scrubber's strip would swallow drags meant
+                // for extending the selection.
+                visible = scrubberVisible && !selection.active,
+                onJump = viewModel::jumpToFraction,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(
+                        top = SCRUBBER_TOP_INSET,
+                        bottom = contentPadding.calculateBottomPadding(),
+                    ),
+            )
 
             // The selection bar floats over the grid rather than replacing the header, so
             // the photos never jump when a selection starts.
@@ -219,3 +277,15 @@ private fun EmptyGrid(indexing: Boolean, filtered: Boolean) {
         )
     }
 }
+
+/**
+ * How far past the first visible row to look for a real photo when placing the slider's
+ * thumb. The first visible entry is often a date heading, which carries no date of its own.
+ */
+private const val LOOKAHEAD_FOR_DATE = 8
+
+/** How long the slider stays after the grid stops moving. */
+private const val SCRUBBER_LINGER_MS = 1_200L
+
+/** Keeps the slider clear of the header above the grid. */
+private val SCRUBBER_TOP_INSET = 8.dp

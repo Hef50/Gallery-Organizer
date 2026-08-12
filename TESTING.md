@@ -109,6 +109,16 @@ seen is still slow, that cache is not working and is worth reporting.
 Also try it at one column (pinch all the way in). That used to decode a full 200 MP original
 per tile.
 
+### The date slider
+Start scrolling and a slim thumb appears down the right edge, with year labels beside it.
+Drag it: a bubble shows the month and how many photos are in it, you get a small haptic tick
+as each month passes, and letting go lands the grid on that month.
+
+Worth checking: the rail is weighted by how many photos you took, not one slot per month — so
+the months you shot most should take up the most room and be the easiest to hit. Drag it all
+the way to the bottom and you should land on your oldest photos, not near them. It only
+appears for date-ordered results, so it is correctly absent under "largest first".
+
 ### Scrolling performance at your library's size
 
 The budget is a smooth grid and a cold start under 1.5 s. On a large library, watch for:
@@ -228,7 +238,7 @@ only the app's own database.
 ## 6. Running the tests
 
 ```bash
-./gradlew testDebugUnitTest   # 257 tests, JVM only, no device needed
+./gradlew testDebugUnitTest   # 282 tests, JVM only, no device needed
 ./gradlew lintDebug           # must be clean
 ```
 

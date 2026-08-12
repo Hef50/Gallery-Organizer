@@ -724,3 +724,57 @@ per table — there is no way to say "this write does not change anything the gr
 EXIF backfill added in P12 committed every 250 rows, so a 150k library would interrupt the
 grid six hundred times while it ran. The only lever is committing less often, so it now uses
 the app's standard ~500-row transaction.
+
+---
+
+## The date slider
+
+A 150,000-item library is well over a thousand screens of grid, so "take me to spring 2019"
+was not a scrolling problem to be optimised — no fling is short enough. It needed a way to
+jump.
+
+### It works in dates, not indices
+The obvious design tracks a position: the thumb shows index / total, and dragging it scrolls
+to an index. That is wrong here for the same reason that broke the viewer: the grid pages
+without placeholders, so an item's index in the list is not its position in the query, and
+after a jump it is not even close.
+
+A date has no such problem. Every photo carries one, so the thumb's position is derived from
+the date of the topmost visible photo, and a drop is resolved from a date back to an offset.
+Nothing has to reconcile the two coordinate systems, because there is only one.
+
+### Jumping re-anchors the paging window rather than scrolling to a position
+With placeholders off, there is no position 40,000 to scroll to until 40,000 items have been
+paged through, which is exactly the crawl the slider exists to replace. So a jump rebuilds
+the pager with `initialKey` at the target offset: one page loads at the destination, and
+Paging still prepends normally as the user scrolls back up towards newer photos.
+
+### The rail is allocated by photo, not by month
+One equal slot per month would spend most of the rail on months with almost nothing in them,
+and compress the summer you actually took nine thousand photographs into a sliver you cannot
+aim at. Rail space is proportional to item count, so the slider is a picture of where the
+photos are. The thumb also interpolates *within* a month rather than snapping to its start —
+otherwise, in a library dominated by one month, it would sit still for most of the drag.
+
+### Bucketing months in Kotlin, not in SQL — measured at seven to one
+The natural implementation is `GROUP BY strftime('%Y-%m', date_taken, 'unixepoch',
+'localtime')`. Measured on 150,000 rows it took **550 ms**, because `strftime` runs per row
+and consults the time zone database each time, and the grouped expression cannot use an
+index so SQLite sorts the whole result in a temp B-tree.
+
+Selecting the bare `date_taken` values instead is a covering-index scan of the index the grid
+already depends on, and folding them into months in Kotlin costs one boundary calculation per
+month — about a hundred and fifty for a decade — instead of one per row. Same answer, **72 ms**.
+That is the difference between the slider appearing instantly and taking a couple of seconds
+on a phone every time a filter changes.
+
+The boundaries still come from `java.time`, so daylight saving is exact rather than assumed;
+`ScrubberTest` covers a month containing a clock change and the first and last instants of a
+month.
+
+### It is not offered where it would be lying
+Only for date-ordered results. "Largest first" has no chronology, and "recently added" orders
+by when this app first saw a file — so a photo from 2014 restored last week sits at the top,
+and a rail labelled with years would be describing something the grid is not doing. A library
+spanning a single month gets no slider either: a control that cannot go anywhere invites a
+gesture that does nothing.

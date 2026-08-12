@@ -5,11 +5,18 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import com.galleryorganizer.data.db.AppDatabase
 import com.galleryorganizer.data.db.entity.MediaEntity
 import com.galleryorganizer.data.db.entity.SavedSearchEntity
+import com.galleryorganizer.domain.scrub.ScrubberModel
+import com.galleryorganizer.domain.scrub.foldMonths
 import com.galleryorganizer.domain.search.SearchQuery
 import com.galleryorganizer.domain.search.SearchSql
+import com.galleryorganizer.domain.search.SortOrder
 import com.galleryorganizer.domain.search.SqlStatement
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import java.time.ZoneId
 
 /** A saved search with its query already parsed. */
 data class SavedSearch(
@@ -22,6 +29,8 @@ data class SavedSearch(
 class SearchRepository(
     private val db: AppDatabase,
     private val now: () -> Long = System::currentTimeMillis,
+    private val zone: ZoneId = ZoneId.systemDefault(),
+    private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
 
     private val mediaDao get() = db.mediaDao()
@@ -46,6 +55,38 @@ class SearchRepository(
     suspend fun pagingSource(query: SearchQuery): PagingSource<Int, MediaEntity> {
         val statement = statementFor(query)
         return mediaDao.pagingSourceRaw(SimpleSQLiteQuery(statement.sql, statement.args.toTypedArray()))
+    }
+
+    /**
+     * The date slider's model for a query.
+     *
+     * Reads the bare `date_taken` of every match through the grid's own covering index and
+     * folds them into months in Kotlin — see [SearchSql.buildDates] for why that beats
+     * grouping in SQL by roughly seven to one. The result is one entry per month, so the
+     * model stays a few kilobytes for a decade of photography however large the library is,
+     * and it is only recomputed when the search itself changes.
+     */
+    suspend fun scrubberFor(query: SearchQuery): ScrubberModel = withContext(io) {
+        if (!query.sort.isChronological) return@withContext ScrubberModel.Empty
+
+        val statement = SearchSql.buildDates(query, subtreeResolver(query))
+        val dates = db.query(statement.sql, statement.args.toTypedArray()).use { cursor ->
+            // A primitive array rather than a List<Long>: at 150,000 rows the boxing alone
+            // would be a couple of megabytes of garbage for values thrown away as soon as
+            // they have been counted.
+            var buffer = LongArray(cursor.count.coerceAtLeast(INITIAL_DATE_CAPACITY))
+            var size = 0
+            while (cursor.moveToNext()) {
+                if (size == buffer.size) buffer = buffer.copyOf(size * 2)
+                buffer[size++] = cursor.getLong(0)
+            }
+            buffer.copyOf(size)
+        }
+
+        ScrubberModel.from(
+            foldMonths(dates.asSequence(), zone),
+            newestFirst = query.sort == SortOrder.NewestFirst,
+        )
     }
 
     suspend fun observeCount(query: SearchQuery): Flow<Int> {
@@ -124,5 +165,8 @@ class SearchRepository(
 
     companion object {
         const val SELECT_ALL_LIMIT = 10_000
+
+        /** Only used when the driver cannot tell us the row count up front. */
+        const val INITIAL_DATE_CAPACITY = 4_096
     }
 }

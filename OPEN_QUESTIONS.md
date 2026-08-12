@@ -194,5 +194,10 @@ Gallery and Google Photos both do, and which solves "get me to 2019" far better 
 amount of flinging), or computing sections from a separate cheap `GROUP BY` over dates
 instead of from the paged stream.
 
-**Current behaviour:** unbounded window, real date headers, no scrubber. This wants a device
-with a genuinely large library to decide on.
+**Update:** the scrubber is now built — see `DateScrubber` and the "date slider" section of
+`DECISIONS.md`. It sidesteps the placeholder question entirely by working in dates rather than
+indices, and jumping by re-anchoring the pager rather than scrolling. So the remaining
+question is narrower than it was: whether the unbounded window is worth bounding at all, now
+that reaching an old photo no longer requires paging through everything above it.
+
+**Current behaviour:** unbounded window, real date headers, and a date slider for jumping.

@@ -12,6 +12,7 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import com.galleryorganizer.data.db.entity.MediaEntity
 import com.galleryorganizer.data.repo.SavedSearch
 import com.galleryorganizer.di.AppContainer
+import com.galleryorganizer.domain.scrub.ScrubberModel
 import com.galleryorganizer.domain.search.SearchQuery
 import com.galleryorganizer.domain.search.SortOrder
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -26,6 +27,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.ZoneId
@@ -76,14 +78,39 @@ class GalleryViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     /**
+     * The date slider's model, rebuilt whenever the search changes.
+     *
+     * One row per month however large the library is, so this is cheap enough to recompute
+     * on every filter change rather than trying to keep it incrementally up to date.
+     */
+    val scrubber: StateFlow<ScrubberModel> = debouncedQuery
+        .map { search.scrubberFor(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ScrubberModel.Empty)
+
+    /**
+     * Where the grid's paging window starts.
+     *
+     * Jumping to a date re-anchors the window there rather than scrolling to it: with
+     * placeholders off the list only contains what has been loaded, so there is no position
+     * 40,000 to scroll to until 40,000 items have been paged through — which is the crawl
+     * the slider exists to replace. Re-anchoring loads one page at the target instead, and
+     * Paging still prepends as the user scrolls back up toward newer photos.
+     */
+    private val anchor = MutableStateFlow(0)
+
+    /** Emitted when the window is re-anchored, so the grid can return to the top of it. */
+    private val _jumps = MutableStateFlow(0)
+    val jumps: StateFlow<Int> = _jumps.asStateFlow()
+
+    /**
      * The grid stream. Date headers are only spliced in for date-ordered results — a
      * "largest first" list broken up by date headings would be nonsense.
      *
      * `cachedIn` keeps loaded pages across configuration changes; without it, rotating the
      * phone re-queries from the top and throws away the scroll position.
      */
-    val entries: Flow<PagingData<GridEntry>> = debouncedQuery
-        .flatMapLatest { query ->
+    val entries: Flow<PagingData<GridEntry>> = combine(debouncedQuery, anchor) { q, a -> q to a }
+        .flatMapLatest { (query, anchorOffset) ->
             val statement = search.statementFor(query)
             val pager = Pager(
                 config = PagingConfig(
@@ -115,6 +142,7 @@ class GalleryViewModel(
                      * OPEN_QUESTIONS.md.
                      */
                 ),
+                initialKey = anchorOffset.takeIf { it > 0 },
                 pagingSourceFactory = {
                     container.database.mediaDao().pagingSourceRaw(
                         SimpleSQLiteQuery(statement.sql, statement.args.toTypedArray()),
@@ -134,23 +162,27 @@ class GalleryViewModel(
     fun setText(text: String) {
         _query.value = _query.value.copy(text = text)
         _activeSavedSearch.value = null
+        anchor.value = 0
     }
 
     fun setQuery(query: SearchQuery) {
         _query.value = query
         _activeSavedSearch.value = null
+        anchor.value = 0
         clearSelection()
     }
 
     fun clearQuery() {
         _query.value = SearchQuery()
         _activeSavedSearch.value = null
+        anchor.value = 0
         clearSelection()
     }
 
     fun openSavedSearch(saved: SavedSearch) {
         _query.value = saved.query
         _activeSavedSearch.value = saved
+        anchor.value = 0
         clearSelection()
     }
 
@@ -167,6 +199,22 @@ class GalleryViewModel(
 
     fun setSavedSearchPinned(id: Long, pinned: Boolean) {
         viewModelScope.launch { search.setPinned(id, pinned) }
+    }
+
+    // --- Date slider --------------------------------------------------------------------
+
+    /**
+     * Jumps the grid to a point on the slider.
+     *
+     * A no-op when the target is already where the window starts, so releasing the slider
+     * without having moved it does not throw away the loaded pages and the user's place.
+     */
+    fun jumpToFraction(fraction: Float) {
+        val target = scrubber.value.offsetAt(fraction)
+        if (target == anchor.value) return
+        anchor.value = target
+        _jumps.value += 1
+        clearSelection()
     }
 
     // --- Viewer -------------------------------------------------------------------------
@@ -261,6 +309,8 @@ class GalleryViewModel(
     fun applyQuickFilter(filter: QuickFilter) {
         _activeSavedSearch.value = null
         _query.value = filter.apply(_query.value)
+        // A new filter means a new result, so the old jump position is meaningless.
+        anchor.value = 0
         clearSelection()
     }
 
@@ -306,9 +356,6 @@ class GalleryViewModel(
 
         private val HEADER_FORMAT: DateTimeFormatter =
             DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
-
-        private val SortOrder.isChronological: Boolean
-            get() = this == SortOrder.NewestFirst || this == SortOrder.OldestFirst
     }
 }
 

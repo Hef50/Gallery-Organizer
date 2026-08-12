@@ -29,6 +29,17 @@ enum class SortOrder {
 
     @SerialName("largest")
     Largest,
+    ;
+
+    /**
+     * True when the result is ordered by when the photo was *taken*, which is the only case
+     * where date headings and the date slider mean anything.
+     *
+     * `RecentlyAdded` is deliberately excluded: it orders by when this app first saw a file,
+     * so a photo from 2014 restored last week sits at the top, and a slider labelled with
+     * years would be lying about what it is scrolling through.
+     */
+    val isChronological: Boolean get() = this == NewestFirst || this == OldestFirst
 }
 
 /**
