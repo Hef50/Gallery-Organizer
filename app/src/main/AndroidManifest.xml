@@ -6,6 +6,18 @@
       offline: MediaStore in, Room out. See CLAUDE.md.
     -->
 
+    <!-- minSdk is 33, so the granular media permissions always exist and there is no
+         READ_EXTERNAL_STORAGE branch anywhere in the codebase. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+
+    <!-- Android 14+: the user may grant access to a hand-picked subset instead. This is
+         a fully supported state, not an error. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+
+    <!-- Progress notification for the indexing worker. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name=".GalleryOrganizerApp"
         android:allowBackup="true"
