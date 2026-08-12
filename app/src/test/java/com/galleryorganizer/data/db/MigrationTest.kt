@@ -55,11 +55,11 @@ class MigrationTest {
             .also { opened = it }
 
     @Test
-    fun `the exported v1 schema is exactly what the compiled entities expect`() = runTest {
+    fun `the exported current schema is exactly what the compiled entities expect`() = runTest {
         // If an entity is edited without bumping the version, Room's identity hash stops
         // matching the committed JSON and this open throws. That makes an accidental
         // silent schema change impossible to merge.
-        seedSchema(version = 1)
+        seedSchema(version = AppDatabase.VERSION)
 
         val db = openThroughRoom()
 
@@ -68,7 +68,7 @@ class MigrationTest {
     }
 
     @Test
-    fun `tags written against v1 survive being opened by the current build`() = runTest {
+    fun `tags written against v1 survive every migration to the current build`() = runTest {
         seedSchema(version = 1) {
             execSQL(
                 """
@@ -103,6 +103,42 @@ class MigrationTest {
             .isEqualTo(com.galleryorganizer.data.db.entity.TagSource.Manual)
         assertThat(db.indexStateDao().get(IndexStateKeys.IMAGE_WATERMARK)).isEqualTo("1700000000")
         assertThat(db.savedSearchDao().count()).isEqualTo(1)
+    }
+
+    @Test
+    fun `v1 to v2 adds the restore lookup index without disturbing any data`() = runTest {
+        seedSchema(version = 1) {
+            execSQL(
+                """
+                INSERT INTO media (id, content_hash, mediastore_id, uri, display_name,
+                    relative_path, bucket_id, bucket_name, mime, is_video, size, date_taken,
+                    date_modified, date_added, date_first_indexed, duration, width, height,
+                    orientation, is_missing, ocr_text)
+                VALUES (1, 'deadbeef', 42, 'content://media/external/images/media/42',
+                    'IMG_0042.jpg', 'DCIM/Camera/', 7, 'Camera', 'image/jpeg', 0, 123456,
+                    1700000000000, 1700000000, 1700000000, 1700000000000, 0, 4032, 3024,
+                    0, 0, 'a receipt')
+                """.trimIndent(),
+            )
+            execSQL("INSERT INTO tag (id, name, parent_id, color, last_used_at, usage_count) VALUES (1, 'Travel', 0, NULL, 5, 3)")
+            execSQL("INSERT INTO media_tag (media_id, tag_id, source, created_at) VALUES (1, 1, 'manual', 99)")
+        }
+
+        val db = openThroughRoom()
+
+        // The point of the migration: the (size, display_name) lookup restore depends on.
+        val indices = db.query("SELECT name FROM sqlite_master WHERE type='index'", null).use { c ->
+            buildList { while (c.moveToNext()) add(c.getString(0)) }
+        }
+        assertThat(indices).contains("index_media_size_display_name")
+        assertThat(db.mediaDao().bySizeAndName(123456, "IMG_0042.jpg")).hasSize(1)
+
+        // ...and nothing it touched lost anything.
+        val item = db.mediaDao().byContentHash("deadbeef")!!
+        assertThat(item.ocrText).isEqualTo("a receipt")
+        assertThat(item.dateFirstIndexed).isEqualTo(1700000000000L)
+        assertThat(db.mediaTagDao().rowsFor(item.id).single().createdAt).isEqualTo(99)
+        assertThat(db.tagDao().byId(1)!!.usageCount).isEqualTo(3)
     }
 
     @Test

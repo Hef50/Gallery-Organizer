@@ -2,6 +2,7 @@ package com.galleryorganizer.di
 
 import android.content.Context
 import com.galleryorganizer.GalleryOrganizerApp
+import com.galleryorganizer.data.backup.BackupRepository
 import com.galleryorganizer.data.db.AppDatabase
 import com.galleryorganizer.data.media.ContentResolverMediaStoreSource
 import com.galleryorganizer.data.media.MediaStoreSource
@@ -38,6 +39,10 @@ class AppContainer(context: Context) {
     val tagRepository: TagRepository by lazy { TagRepository(database, ftsMaintenance) }
 
     val searchRepository: SearchRepository by lazy { SearchRepository(database) }
+
+    val backupRepository: BackupRepository by lazy {
+        BackupRepository(database, tagRepository, ftsMaintenance)
+    }
 
     val mediaIndexer: MediaIndexer by lazy {
         MediaIndexer(mediaStoreSource, database, ftsMaintenance)

@@ -187,6 +187,26 @@ interface MediaDao {
         orientation: Int,
     )
 
+    /**
+     * Fallback identity match for restore: an item that was tagged before it was ever
+     * hashed can still be recognised by its size and filename. Backed by
+     * `index_media_size_display_name` (schema v2).
+     */
+    @Query("SELECT * FROM media WHERE size = :size AND display_name = :displayName")
+    suspend fun bySizeAndName(size: Long, displayName: String): List<MediaEntity>
+
+    /** Ids of everything carrying at least one tag — the export set. */
+    @Query(
+        """
+        SELECT DISTINCT m.id FROM media m JOIN media_tag mt ON mt.media_id = m.id
+        ORDER BY m.id LIMIT :limit OFFSET :offset
+        """,
+    )
+    suspend fun taggedIdsPage(limit: Int, offset: Int): List<Long>
+
+    @Query("SELECT COUNT(DISTINCT media_id) FROM media_tag")
+    suspend fun taggedCount(): Int
+
     /** Paged presence projection for the indexer's missing-file sweep. */
     @Query("SELECT id, mediastore_id, is_missing FROM media ORDER BY id LIMIT :limit OFFSET :offset")
     suspend fun presencePage(limit: Int, offset: Int): List<MediaPresenceRow>

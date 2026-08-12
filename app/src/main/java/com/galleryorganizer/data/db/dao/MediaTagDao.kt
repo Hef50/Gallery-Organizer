@@ -40,6 +40,9 @@ interface MediaTagDao {
     @Query("SELECT * FROM media_tag")
     suspend fun allRows(): List<MediaTagCrossRef>
 
+    @Query("SELECT * FROM media_tag WHERE media_id IN (:mediaIds)")
+    suspend fun rowsForMany(mediaIds: List<Long>): List<MediaTagCrossRef>
+
     @Query(
         """
         SELECT t.* FROM tag t

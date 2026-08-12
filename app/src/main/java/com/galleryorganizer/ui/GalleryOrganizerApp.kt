@@ -2,6 +2,7 @@ package com.galleryorganizer.ui
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sell
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Icon
@@ -33,6 +34,8 @@ import com.galleryorganizer.ui.permissions.rememberMediaPermissionState
 import com.galleryorganizer.ui.search.FilterSheet
 import com.galleryorganizer.ui.search.GallerySearchBar
 import com.galleryorganizer.ui.search.SavedSearchRow
+import com.galleryorganizer.ui.settings.SettingsScreen
+import com.galleryorganizer.ui.settings.SettingsViewModel
 import com.galleryorganizer.ui.tags.BulkTagSheet
 import com.galleryorganizer.ui.tags.TagManagerScreen
 import com.galleryorganizer.ui.tags.TagViewModel
@@ -43,6 +46,7 @@ import kotlinx.coroutines.launch
 object Routes {
     const val GALLERY = "gallery"
     const val TAGS = "tags"
+    const val SETTINGS = "settings"
 }
 
 @Composable
@@ -176,6 +180,9 @@ fun GalleryOrganizerApp() {
                     IconButton(onClick = { navController.navigate(Routes.TAGS) }) {
                         Icon(Icons.Filled.Sell, contentDescription = "Manage tags")
                     }
+                    IconButton(onClick = { navController.navigate(Routes.SETTINGS) }) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                    }
                 },
             )
 
@@ -200,6 +207,15 @@ fun GalleryOrganizerApp() {
 
         composable(Routes.TAGS) {
             TagManagerScreen(viewModel = tagViewModel, onBack = { navController.popBackStack() })
+        }
+
+        composable(Routes.SETTINGS) {
+            val settingsViewModel: SettingsViewModel =
+                viewModel(factory = SettingsViewModel.Factory(container))
+            SettingsScreen(
+                viewModel = settingsViewModel,
+                onBack = { navController.popBackStack() },
+            )
         }
     }
 }

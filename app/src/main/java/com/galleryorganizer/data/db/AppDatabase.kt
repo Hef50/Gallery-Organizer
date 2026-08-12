@@ -52,7 +52,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun savedSearchDao(): SavedSearchDao
 
     companion object {
-        const val VERSION = 1
+        const val VERSION = 2
         const val NAME = "gallery-organizer.db"
 
         fun build(context: Context): AppDatabase =

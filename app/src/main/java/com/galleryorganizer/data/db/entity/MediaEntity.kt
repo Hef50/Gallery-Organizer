@@ -26,6 +26,10 @@ import androidx.room.PrimaryKey
         Index(value = ["date_modified"]),
         Index(value = ["is_missing"]),
         Index(value = ["is_video"]),
+        // Added in schema v2 for restore's fallback match: an item tagged before it was
+        // ever hashed can only be found again by (size, name), and that lookup runs once
+        // per backed-up item. Without the index it is a full table scan each time.
+        Index(value = ["size", "display_name"]),
     ],
 )
 data class MediaEntity(

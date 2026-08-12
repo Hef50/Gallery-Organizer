@@ -342,3 +342,51 @@ grid.
 ### "Select all results" is capped at 10,000
 Selecting 150k items produces a `Set<Long>` the selection bar can do nothing sensible with,
 and a bulk tag at that scale deserves to be a deliberate act rather than an accidental one.
+
+---
+
+## P7 — Backup and restore
+
+### The format is JSON Lines, not one JSON document
+A single top-level object has to be built in memory to write and parsed in memory to read.
+More importantly, a JSON document truncated by a full disk or a cancelled write is a total
+loss, whereas a line-delimited file still restores everything up to the cut. This user has
+no cloud safety net, so the format is chosen for how it fails, not just for how it works.
+Both directions stream in constant memory.
+
+### Only tagged items are exported
+The other 149,000 rows are pure MediaStore facts that reindexing rebuilds in minutes.
+Including them would inflate the file by two orders of magnitude and protect nothing.
+
+### Matching is two-tier: content hash, then size + filename
+The hash is the strong key, but hashing is *lazy* — on a fresh install almost nothing has
+been hashed yet, so a hash-only restore would match nothing on the one occasion it matters
+most, the day the phone is replaced. Size plus filename is the fallback, and schema v2 adds
+`index_media_size_display_name` so that lookup is an index seek rather than a full scan per
+backed-up item.
+
+### A hash resolves to a *set* of rows, and all of them get the tags
+This is the other half of dropping `UNIQUE` from `content_hash`: two copies of the same
+photo are two rows, and identical content deserves identical tags.
+
+### Restore is purely additive
+Nothing is ever deleted or overwritten. Tags merge by *path*, not by id — ids are local
+database details, so restoring onto a device that already has a `Travel` tag must merge
+with it. Assignments insert with IGNORE, so a tag the user has since applied by hand keeps
+its `manual` source instead of being restamped as `imported`. OCR text is only written
+where there is none.
+
+### Saved searches have their tag ids remapped
+A saved search stores tag *ids*, which differ between installs, so they are translated
+through the file's tag refs on the way in. `bucketIds` are MediaStore's and mean nothing on
+another device, so they are dropped. A search whose name is taken is skipped rather than
+duplicated.
+
+### One corrupt line costs that line
+A malformed record is counted and skipped rather than aborting the import — the whole point
+of the format. A file with no valid header, though, is rejected outright rather than
+half-applied.
+
+### Export opens with mode `"wt"`
+Without truncation, overwriting a larger existing backup leaves the tail of the old file
+behind and silently produces a corrupt one.

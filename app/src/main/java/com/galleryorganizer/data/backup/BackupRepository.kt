@@ -1,0 +1,309 @@
+package com.galleryorganizer.data.backup
+
+import androidx.room.withTransaction
+import com.galleryorganizer.data.db.AppDatabase
+import com.galleryorganizer.data.db.entity.MediaTagCrossRef
+import com.galleryorganizer.data.db.entity.SavedSearchEntity
+import com.galleryorganizer.data.db.entity.TagEntity
+import com.galleryorganizer.data.db.entity.TagSource
+import com.galleryorganizer.data.repo.FtsMaintenance
+import com.galleryorganizer.data.repo.TagRepository
+import com.galleryorganizer.domain.search.SearchQuery
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
+import java.io.BufferedWriter
+import java.io.InputStream
+import java.io.OutputStream
+
+/**
+ * Export and restore of everything the app owns and the device cannot regenerate: the tag
+ * hierarchy, which items carry which tags, OCR text, and saved searches.
+ *
+ * Media is never exported — the photos are already on the device and are not this app's to
+ * copy. What is exported is the *identity* of each tagged item (content hash, plus size
+ * and filename as a fallback) so tags can be reattached after a reinstall, a file move, or
+ * a move to a different phone.
+ */
+class BackupRepository(
+    private val db: AppDatabase,
+    private val tags: TagRepository,
+    private val fts: FtsMaintenance = FtsMaintenance(db),
+    private val now: () -> Long = System::currentTimeMillis,
+    private val io: CoroutineDispatcher = Dispatchers.IO,
+) {
+
+    // --- Export -----------------------------------------------------------------------
+
+    /**
+     * Writes the backup to [sink] as JSON Lines, a page at a time, so memory stays flat
+     * regardless of library size.
+     *
+     * Only items carrying at least one tag are written. The other 149,000 rows are pure
+     * MediaStore facts that reindexing rebuilds in minutes; including them would inflate
+     * the file by two orders of magnitude and protect nothing.
+     */
+    suspend fun export(
+        sink: OutputStream,
+        appVersion: String = "",
+        onProgress: suspend (written: Int, total: Int) -> Unit = { _, _ -> },
+    ): BackupStats = withContext(io) {
+        val writer = sink.bufferedWriter()
+        var stats = BackupStats()
+
+        val allTags = db.tagDao().allTags()
+        val total = db.mediaDao().taggedCount()
+
+        writer.writeRecord(
+            BackupHeader(
+                exportedAt = now(),
+                appVersion = appVersion,
+                tagCount = allTags.size,
+                itemCount = total,
+                savedSearchCount = db.savedSearchDao().count(),
+            ),
+        )
+
+        val paths = tagPaths(allTags)
+        for (tag in allTags) {
+            writer.writeRecord(
+                TagRecord(ref = tag.id, path = paths.getValue(tag.id), color = tag.color),
+            )
+        }
+        stats = stats.copy(tags = allTags.size)
+
+        var offset = 0
+        var written = 0
+        var assignments = 0
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val ids = db.mediaDao().taggedIdsPage(PAGE, offset)
+            if (ids.isEmpty()) break
+
+            val rows = db.mediaDao().byIds(ids).associateBy { it.id }
+            val assignmentsByMedia = db.mediaTagDao().rowsForMany(ids).groupBy { it.mediaId }
+
+            for (id in ids) {
+                val media = rows[id] ?: continue
+                writer.writeRecord(
+                    ItemRecord(
+                        hash = media.contentHash,
+                        displayName = media.displayName,
+                        relativePath = media.relativePath,
+                        size = media.size,
+                        dateTaken = media.dateTaken,
+                        ocrText = media.ocrText,
+                        tags = assignmentsByMedia[id].orEmpty().map {
+                            TagAssignment(it.tagId, it.source.wire, it.createdAt)
+                        },
+                    ),
+                )
+                assignments += assignmentsByMedia[id]?.size ?: 0
+                written++
+            }
+            offset += ids.size
+            onProgress(written, total)
+            if (ids.size < PAGE) break
+        }
+        stats = stats.copy(items = written, assignments = assignments)
+
+        val searches = db.savedSearchDao().all()
+        for (saved in searches) {
+            writer.writeRecord(SavedSearchRecord(saved.name, saved.queryJson, saved.pinned))
+        }
+        writer.flush()
+        stats.copy(savedSearches = searches.size)
+    }
+
+    /** Full `Travel/Japan/Kyoto` path per tag id, so the file carries no local ids. */
+    private fun tagPaths(all: List<TagEntity>): Map<Long, List<String>> {
+        val byId = all.associateBy { it.id }
+        return all.associate { tag ->
+            val path = ArrayDeque<String>()
+            var node: TagEntity? = tag
+            var guard = 0
+            while (node != null && guard++ < MAX_DEPTH) {
+                path.addFirst(node.name)
+                node = byId[node.parentId]
+            }
+            tag.id to path.toList()
+        }
+    }
+
+    private fun BufferedWriter.writeRecord(record: BackupRecord) {
+        write(BackupJson.encodeToString(BackupRecord.serializer(), record))
+        newLine()
+    }
+
+    // --- Import -----------------------------------------------------------------------
+
+    /**
+     * Restores from [source]. Purely additive: nothing existing is ever deleted or
+     * overwritten, tags merge by path, and assignments are inserted with IGNORE so a tag
+     * the user has since applied manually keeps its `manual` source.
+     *
+     * Matching is deliberately two-tier. The content hash is the strong key, but on a
+     * fresh install almost nothing has been hashed yet — hashing is lazy — so a
+     * hash-only restore would match nothing on the one occasion it matters most. Size plus
+     * filename is the fallback, and it is why this works the day the phone is replaced.
+     */
+    suspend fun import(
+        source: InputStream,
+        onProgress: suspend (read: Int) -> Unit = {},
+    ): ImportReport = withContext(io) {
+        var report = ImportReport()
+        val tagIdByRef = HashMap<Long, Long>()
+        var sawHeader = false
+        var read = 0
+
+        source.bufferedReader().useLines { lines ->
+            for (line in lines) {
+                currentCoroutineContext().ensureActive()
+                if (line.isBlank()) continue
+
+                val record = runCatching {
+                    BackupJson.decodeFromString(BackupRecord.serializer(), line)
+                }.getOrNull()
+
+                if (record == null) {
+                    // One corrupt line must not cost the user the rest of the file.
+                    report = report.copy(malformedLines = report.malformedLines + 1)
+                    continue
+                }
+
+                when (record) {
+                    is BackupHeader -> {
+                        sawHeader = true
+                        if (record.format != BackupHeader.FORMAT) {
+                            return@withContext report.copy(wrongFormat = true)
+                        }
+                    }
+
+                    is TagRecord -> {
+                        val existing = resolvePath(record.path)
+                        val id = tags.ensurePath(record.path)
+                        tagIdByRef[record.ref] = id
+                        report = if (existing != null) {
+                            report.copy(tagsMerged = report.tagsMerged + 1)
+                        } else {
+                            report.copy(tagsCreated = report.tagsCreated + 1)
+                        }
+                        record.color?.let { tags.setColor(id, it) }
+                    }
+
+                    is ItemRecord -> {
+                        report = applyItem(record, tagIdByRef, report)
+                        read++
+                        if (read % PROGRESS_EVERY == 0) onProgress(read)
+                    }
+
+                    is SavedSearchRecord -> report = importSavedSearch(record, tagIdByRef, report)
+                }
+            }
+        }
+
+        if (!sawHeader) return@withContext report.copy(wrongFormat = true)
+        onProgress(read)
+        report
+    }
+
+    private suspend fun applyItem(
+        record: ItemRecord,
+        tagIdByRef: Map<Long, Long>,
+        report: ImportReport,
+    ): ImportReport {
+        val byHash = record.hash?.let { db.mediaDao().byContentHashAll(it) }.orEmpty()
+        // A hash resolves to a *set* of rows, and tagging all of them is the right
+        // behaviour: identical content deserves identical tags.
+        val matches = byHash.ifEmpty {
+            db.mediaDao().bySizeAndName(record.size, record.displayName)
+        }
+        if (matches.isEmpty()) {
+            return report.copy(itemsUnmatched = report.itemsUnmatched + 1)
+        }
+
+        val rows = record.tags.mapNotNull { assignment ->
+            val tagId = tagIdByRef[assignment.tag] ?: return@mapNotNull null
+            matches.map { media ->
+                MediaTagCrossRef(
+                    mediaId = media.id,
+                    tagId = tagId,
+                    // Imported tags are marked as such so it stays visible where they came
+                    // from, but they never overwrite something applied by hand.
+                    source = TagSource.Imported,
+                    createdAt = assignment.createdAt,
+                )
+            }
+        }.flatten()
+
+        var ocrRestored = 0
+        db.withTransaction {
+            if (rows.isNotEmpty()) db.mediaTagDao().insertIgnoring(rows)
+            if (!record.ocrText.isNullOrBlank()) {
+                matches.filter { it.ocrText.isNullOrBlank() }.forEach {
+                    db.mediaDao().setOcrText(it.id, record.ocrText)
+                    ocrRestored++
+                }
+            }
+            fts.rebuild(matches.map { it.id })
+        }
+
+        return report.copy(
+            itemsMatchedByHash = report.itemsMatchedByHash + if (byHash.isNotEmpty()) 1 else 0,
+            itemsMatchedByName = report.itemsMatchedByName + if (byHash.isEmpty()) 1 else 0,
+            assignmentsApplied = report.assignmentsApplied + rows.size,
+            ocrRestored = report.ocrRestored + ocrRestored,
+        )
+    }
+
+    /**
+     * Saved searches reference tag *ids*, which differ between installs, so they are
+     * remapped through the file's tag refs. A search whose tags cannot all be resolved is
+     * still imported — with the unresolvable ones dropped — because a partly-working smart
+     * album beats a missing one.
+     */
+    private suspend fun importSavedSearch(
+        record: SavedSearchRecord,
+        tagIdByRef: Map<Long, Long>,
+        report: ImportReport,
+    ): ImportReport {
+        if (db.savedSearchDao().all().any { it.name.equals(record.name, ignoreCase = true) }) {
+            return report.copy(savedSearchesSkipped = report.savedSearchesSkipped + 1)
+        }
+        val query = SearchQuery.decode(record.queryJson).remapTags(tagIdByRef)
+        db.savedSearchDao().insert(
+            SavedSearchEntity(
+                name = record.name,
+                queryJson = query.encode(),
+                createdAt = now(),
+                updatedAt = now(),
+                pinned = record.pinned,
+            ),
+        )
+        return report.copy(savedSearchesImported = report.savedSearchesImported + 1)
+    }
+
+    private suspend fun resolvePath(path: List<String>): Long? {
+        var parent = TagEntity.ROOT_PARENT_ID
+        for (segment in path) {
+            parent = db.tagDao().byNameUnder(parent, segment)?.id ?: return null
+        }
+        return parent
+    }
+
+    private companion object {
+        const val PAGE = 500
+        const val PROGRESS_EVERY = 200
+        const val MAX_DEPTH = 32
+    }
+}
+
+internal fun SearchQuery.remapTags(map: Map<Long, Long>): SearchQuery = copy(
+    allTags = allTags.mapNotNull { map[it] },
+    anyTags = anyTags.mapNotNull { map[it] },
+    noneTags = noneTags.mapNotNull { map[it] },
+    // bucketIds are MediaStore's, not ours, and mean nothing on a different device.
+    bucketIds = emptyList(),
+)
