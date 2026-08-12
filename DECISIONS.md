@@ -80,7 +80,7 @@ of a JPEG/HEIC covers EXIF plus the start of entropy-coded data, and combining i
 the exact byte size makes an accidental collision vanishingly unlikely for real camera
 output. `date_taken` is folded in as a final tiebreak so two byte-identical copies shot
 at different times (rare, but real for burst exports) stay distinct. The hash is stored
-as a hex string in `media.content_hash UNIQUE`.
+as a hex string in `media.content_hash` (indexed, not unique — see below).
 
 The pathological case is a family of files that share a size and a 64 KiB prefix but
 differ later — for example, large videos from the same camera with identical container
@@ -88,7 +88,7 @@ headers. This is why `content_hash` is nullable and computed lazily rather than 
 the primary key: an item is perfectly usable before it is hashed, and the collision path
 degrades to "these two items share tags", not "data loss".
 
-### Synthetic `media.id` primary key, `content_hash` as a unique index
+### Synthetic `media.id` primary key, `content_hash` as a secondary index
 Cross-ref tables key on the compact `INTEGER` id rather than a 64-char hex string, which
 keeps `media_tag` small and its indices fast. `content_hash` is the *stable identity*
 used for backup/restore rematching; `id` is a local database detail that never leaves
@@ -122,11 +122,14 @@ room for a feature that is already specified. The FTS table indexes it from day 
 ordinal would make the backup format brittle against reordering an enum. The Kotlin side
 is still a sealed `TagSource` enum with an explicit stable `wire` string.
 
-### Tag hierarchy: adjacency list with `ON DELETE CASCADE`, uniqueness per parent
+### Tag hierarchy: adjacency list, uniqueness per parent, roots at `parent_id = 0`
 `tag(parent_id)` is a plain adjacency list. Depth is expected to be 2–3, so recursive
 CTEs for subtree queries are cheap and the write path stays trivial. Uniqueness is
 `(parent_id, name)` collated `NOCASE`, so `Travel/Japan` and `Food/Japan` coexist but
-`Travel/japan` cannot be created twice.
+`Travel/japan` cannot be created twice. Roots use `parent_id = 0` rather than
+`NULL`, because SQLite considers every `NULL` distinct and two root tags called
+"Travel" would otherwise both satisfy the unique index. The cost is that `parent_id`
+carries no foreign key, so `TagDao.deleteSubtree` walks the subtree explicitly.
 
 ### Deletion is `is_missing`, never a row delete
 When the indexer stops seeing a file it sets `is_missing = 1` and keeps the row and its
@@ -134,3 +137,23 @@ tags. Files come back — SD card remounted, folder restored from a backup, phon
 Discarding the tags on a transient absence would be exactly the data loss this app exists
 to prevent. Missing rows are hidden from the grid by default and can be swept manually
 from Settings.
+
+### `content_hash` is indexed, **not** `UNIQUE` — a deliberate deviation from the brief
+The brief's schema sketch says `content_hash UNIQUE`. Implemented literally, the second
+copy of a genuinely duplicated file could not be inserted at all: the row would be
+rejected, the file would silently vanish from the grid, and P10's duplicate finder — which
+is specified as "find items sharing a `content_hash`" — could never find anything, because
+the constraint guarantees no two rows ever share one.
+
+What the brief was reaching for is "one row per file", and that is already guaranteed by
+matching on `mediastore_id` during indexing. So `content_hash` gets a plain index. Restore
+resolves a hash to a *set* of rows and tags all of them, which is the behaviour you want
+anyway: identical content deserves identical tags.
+
+### Migration tests build the old schema from Room's own exported JSON
+`MigrationTestHelper` wants an `Instrumentation` and reads schemas from the test APK's
+assets, which is awkward without a device. `SchemaBundle` instead reads the committed
+`app/schemas/**/N.json` — the exact schema that shipped — replays its `createSql`
+statements, and writes `room_master_table` with the recorded identity hash. Opening that
+database through Room then validates the identity hash for free, so editing an entity
+without bumping the version makes `MigrationTest` fail rather than silently shipping.

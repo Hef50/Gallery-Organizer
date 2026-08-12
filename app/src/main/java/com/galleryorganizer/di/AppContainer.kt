@@ -2,6 +2,7 @@ package com.galleryorganizer.di
 
 import android.content.Context
 import com.galleryorganizer.GalleryOrganizerApp
+import com.galleryorganizer.data.db.AppDatabase
 import com.galleryorganizer.data.prefs.SettingsStore
 
 /**
@@ -12,6 +13,8 @@ import com.galleryorganizer.data.prefs.SettingsStore
 class AppContainer(context: Context) {
 
     val appContext: Context = context.applicationContext
+
+    val database: AppDatabase by lazy { AppDatabase.build(appContext) }
 
     val settings: SettingsStore by lazy { SettingsStore(appContext) }
 
